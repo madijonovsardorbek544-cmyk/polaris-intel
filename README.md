@@ -1,21 +1,28 @@
 # POLARIS — Political & Cyber Risk Intelligence System
 
-POLARIS is a unified cyber–geopolitical intelligence platform that analyzes cyber threats, disinformation signals, and diplomatic risk indicators in one system.
+POLARIS is a unified cyber–geopolitical intelligence platform that analyzes:
+- Cyber threats
+- Disinformation campaigns
+- Geopolitical and diplomatic risk signals
 
-## Core Modules
-- Cyber Threat Intelligence
-- Disinformation & Election Monitoring
-- Cyber Diplomacy & Sanctions Analysis
+All intelligence is processed in a single automated system.
 
-## MVP Goals
-- Collect data (RSS/news + sample datasets)
-- Normalize and store events
-- Risk scoring (rule-based)
-- Basic dashboard
+## Core Capabilities
+- Cyber threat intelligence aggregation
+- Disinformation & influence monitoring
+- Risk scoring and prioritization
+- Structured intelligence reports
+
+## Tech Stack
+- Python
+- FastAPI
+- Uvicorn
+- RSS ingestion
+- Rule-based risk analysis
 
 ## Project Status
-MVP — in progress.
+MVP — active development.
 
 ## Author
-Founder & Developer: Sardorbek Madijonov  
-
+Sardorbek Madijonov  
+Founder & Developer
