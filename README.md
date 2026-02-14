@@ -17,5 +17,5 @@ POLARIS is a unified cyber–geopolitical intelligence platform that analyzes cy
 MVP — in progress.
 
 ## Author
-Founder & Developer: Sardorbek Madijonov
+Founder & Developer: Sardorbek Madijonov  
 
