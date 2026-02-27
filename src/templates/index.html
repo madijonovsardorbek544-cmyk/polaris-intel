@@ -95,8 +95,6 @@ async function loadLatest(){
       const summary = safe(it.explanation  it.summary  it.reason || "");
       const source = safe(it.source  it.url  "");
       const tags = (it.tags && Array.isArray(it.tags)) ? it.tags : [];
-
-Madijonov Sardorbek, [26/02/2026 23:20]
 const div = document.createElement("div");
       div.className = "card " + levelClass(level);
       div.innerHTML = 
