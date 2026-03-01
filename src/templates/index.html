@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -5,88 +6,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>POLARIS Intel — Cyber & Geopolitical Risk</title>
   <style>
-    :root{
-      --bg:#0b1220;
-      --panel:rgba(255,255,255,.04);
-      --border:rgba(255,255,255,.10);
-      --muted:rgba(232,238,252,.78);
-      --text:#e8eefc;
-      --blue:#2d6cdf;
-      --chip:rgba(255,255,255,.08);
-
-      --dangerBg:rgba(255,80,80,.18);
-      --dangerBd:rgba(255,80,80,.25);
-
-      --warnBg:rgba(255,190,80,.16);
-      --warnBd:rgba(255,190,80,.25);
-
-      --okBg:rgba(80,220,160,.14);
-      --okBd:rgba(80,220,160,.22);
-    }
-
-    *{box-sizing:border-box}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; background:var(--bg); color:var(--text)}
-    a{color:#8fb4ff}
-
-    header{
-      padding:28px 18px;
-      border-bottom:1px solid rgba(255,255,255,.08);
-      background:rgba(255,255,255,.02)
-    }
+    body{font-family:system-ui,Arial; margin:0; background:#0b1220; color:#e8eefc}
+    header{padding:28px 18px; border-bottom:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.02)}
     .wrap{max-width:980px; margin:0 auto}
-    .topline{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap}
-
-    h1{margin:0 0 8px; font-size:28px; letter-spacing:.2px}
-    p{margin:0; color:var(--muted); line-height:1.55}
-
+    h1{margin:0 0 8px; font-size:28px}
+    p{margin:0; opacity:.85; line-height:1.5}
     .row{display:flex; gap:10px; flex-wrap:wrap; margin-top:16px}
-    .btn{
-      background:var(--blue);
-      color:#fff;
-      border:none;
-      padding:10px 14px;
-      border-radius:10px;
-      cursor:pointer;
-      font-weight:700;
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-    }
-    .btn:disabled{opacity:.6; cursor:not-allowed}
-    .btn.sec{
-      background:rgba(255,255,255,.08);
-      color:var(--text);
-      text-decoration:none;
-      font-weight:700;
-    }
-
-    .small{font-size:12px; color:rgba(232,238,252,.7)}
-    .status{font-size:12px; color:rgba(232,238,252,.75); margin-top:6px}
-
-    code{
-      background:rgba(255,255,255,.08);
-      padding:2px 6px;
-      border-radius:8px
-    }
-
+    .btn{background:#2d6cdf; color:#fff; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600}
+    .btn.sec{background:rgba(255,255,255,.08)}
     main{padding:18px}
     .grid{display:grid; grid-template-columns:1fr; gap:12px}
-
-    .card{
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:14px;
-      padding:14px;
-    }
-    .card h3{margin:10px 0 6px; font-size:16px}
-    .meta{display:flex; gap:8px; flex-wrap:wrap; font-size:12px; color:rgba(232,238,252,.82)}
-    .pill{padding:4px 8px; border-radius:999px; background:var(--chip); border:1px solid rgba(255,255,255,.06)}
-    .danger{background:var(--dangerBg); border:1px solid var(--dangerBd)}
-    .warn{background:var(--warnBg); border:1px solid var(--warnBd)}
-    .ok{background:var(--okBg); border:1px solid var(--okBd)}
-
-    .divider{height:1px; background:rgba(255,255,255,.08); margin:14px 0}
-    .footerNote{padding:14px; border-top:1px solid rgba(255,255,255,.08); color:rgba(232,238,252,.72); font-size:12px}
+    .card{background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:14px}
+    .meta{display:flex; gap:10px; flex-wrap:wrap; font-size:12px; opacity:.8}
+    .pill{padding:4px 8px; border-radius:999px; background:rgba(255,255,255,.08)}
+    .danger{background:rgba(255,80,80,.18); border:1px solid rgba(255,80,80,.25)}
+    .warn{background:rgba(255,190,80,.16); border:1px solid rgba(255,190,80,.25)}
+    .ok{background:rgba(80,220,160,.14); border:1px solid rgba(80,220,160,.22)}
+    a{color:#8fb4ff}
+    .small{font-size:12px; opacity:.7}
+    .topline{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap}
+    .status{font-size:12px; opacity:.75}
+    code{background:rgba(255,255,255,.08); padding:2px 6px; border-radius:8px}
   </style>
 </head>
 
@@ -97,13 +37,14 @@
         <div>
           <h1>POLARIS Intel</h1>
           <p>Cyber + geopolitical risk intelligence. Live feed from your API.</p>
-          <div class="status" id="status">Status: ready</div>
         </div>
+        <div class="status" id="status">Status: loading…</div>
       </div>
 
       <div class="row">
-        <button class="btn" id="refreshBtn" type="button">Refresh latest</button>
-        <a class="btn sec" href="/docs">Open API Docs</a>
+        <button class="btn" id="refreshBtn">Refresh latest</button>
+        <a class="btn sec" href="/docs" style="text-decoration:none; display:inline-block">Open API Docs</a>
+        <a class="btn sec" href="/reports" style="text-decoration:none; display:inline-block">Reports page</a>
       </div>
 
       <p class="small" style="margin-top:10px;">
@@ -114,154 +55,86 @@
 
   <main class="wrap">
     <div class="grid" id="cards"></div>
-
-    <div class="divider"></div>
-    <div class="footerNote">
-      Tip: If you update the backend but the page looks unchanged, hard refresh (Ctrl+Shift+R) or open with <code>?v=2</code>.
-    </div>
   </main>
 
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const statusEl = document.getElementById("status");
-      const cardsEl  = document.getElementById("cards");
-      const btn      = document.getElementById("refreshBtn");
+    function levelClass(level){
+      const v = String(level || "").toLowerCase();
+      if (v.includes("high") || v.includes("critical")) return "danger";
+      if (v.includes("medium")) return "warn";
+      if (v.includes("low")) return "ok";
+      return "";
+    }
 
-      function safe(v){
-        return (v === null || v === undefined) ? "" : String(v);
-      }
+    function safe(v){ return (v === null || v === undefined) ? "" : String(v); }
 
-      function scoreToLevel(score){
-        const s = Number(score);
-        if (!Number.isFinite(s)) return "N/A";
-        if (s >= 75) return "High";
-        if (s >= 50) return "Medium";
-        return "Low";
-      }
+    function normalizeItems(data){
+      // supports:
+      // A) [ ... ]
+      // B) { risks: [...] }
+      // C) { items: [...] }
+      if (Array.isArray(data)) return data;
+      if (data && Array.isArray(data.risks)) return data.risks;
+      if (data && Array.isArray(data.items)) return data.items;
+      return [];
+    }
 
-      function levelClass(level){
-        const v = String(level || "").toLowerCase();
-        if (v.includes("high") || v.includes("critical")) return "danger";
-        if (v.includes("medium")) return "warn";
-        if (v.includes("low")) return "ok";
-        return "";
-      }
+    async function loadLatest(){
+      const status = document.getElementById("status");
+      const cards = document.getElementById("cards");
+      status.textContent = "Status: fetching…";
+      cards.innerHTML = "";
 
-      function setStatus(text){
-        statusEl.textContent = text;
-      }
+      try{
+        const res = await fetch("/api/latest", { cache: "no-store" });
+        if(!res.ok) throw new Error("HTTP " + res.status);
 
-      function renderEmpty(){
-        cardsEl.innerHTML = `
-          <div class="card">
-            <div class="meta">
-              <span class="pill">No data</span>
-            </div>
-            <h3>Nothing to show yet</h3>
-            <p style="margin:0; color:rgba(232,238,252,.82)">
-              Your <code>/api/latest</code> returned an empty list. Add items and refresh.
-            </p>
-          </div>
-        `;
-      }
+        const data = await res.json();
+        const items = normalizeItems(data);
 
-      function renderError(msg){
-        cardsEl.innerHTML = `
-          <div class="card danger">
-            <div class="meta">
-              <span class="pill">Error</span>
-              <span class="pill">${safe(msg)}</span>
-            </div>
-            <h3>Failed to load /api/latest</h3>
-            <p style="margin:0; color:rgba(232,238,252,.85)">
-              Open <a href="/api/latest" target="_blank" rel="noreferrer">/api/latest</a> to verify the API response.
-            </p>
-          </div>
-        `;
-      }
-
-      function renderItems(items){
-        cardsEl.innerHTML = "";
-
-        items.forEach((it, idx) => {
-          const title    = safe(it.title || it.headline || ("Item " + (idx + 1)));
-          const category = safe(it.category || it.type || "N/A");
-
-          // Your current API uses: title, risk_score, category
-          const score = (it.risk_score !== undefined) ? it.risk_score : it.score;
-          const level = safe(it.risk_level || it.level || scoreToLevel(score));
-
-          const summary = safe(it.explanation || it.summary || it.reason || "");
-          const source  = safe(it.source || it.url || "");
-          const tags    = Array.isArray(it.tags) ? it.tags : [];
-
-          const chipTags = tags.slice(0, 4).map(t => `<span class="pill">${safe(t)}</span>`).join("");
+        if(!items.length){
+          cards.innerHTML = '<div class="card">No items yet. Add real sources later (news, CVE feeds, geo events) and refresh.</div>';
+          status.textContent = "Status: OK (0 items)";
+          return;
+        }
+items.forEach((it, idx) => {
+          const title = safe(it.title  it.headline  ("Item " + (idx+1)));
+          const level = safe(it.risk_level  it.level  it.risk  it.category  "N/A");
+          const summary = safe(it.explanation  it.summary  it.reason || "");
+          const source = safe(it.source  it.url  "");
+          const score = (it.risk_score !== undefined) ? safe(it.risk_score) : "";
+          const tags = Array.isArray(it.tags) ? it.tags : [];
 
           const div = document.createElement("div");
           div.className = "card " + levelClass(level);
 
-          const scoreChip = Number.isFinite(Number(score)) ? `<span class="pill">Score: ${Number(score)}</span>` : "";
+          const tagHtml = tags.slice(0,4).map(t => <span class="pill">${safe(t)}</span>).join("");
 
-          div.innerHTML = `
+          div.innerHTML = 
             <div class="meta">
-              <span class="pill">#${idx + 1}</span>
-              <span class="pill">Category: ${category}</span>
-              <span class="pill">Risk: ${level}</span>
-              ${scoreChip}
-              ${chipTags}
+              <span class="pill">#${idx+1}</span>
+              <span class="pill">Risk: ${safe(level)}</span>
+              ${score ? <span class="pill">Score: ${score}</span> : ""}
+              ${tagHtml}
             </div>
-
-            <h3>${title}</h3>
-
-            ${
-              summary
-              ? `<p style="margin:0 0 10px; color:rgba(232,238,252,.88)">${summary}</p>`
-              : `<p style="margin:0 0 10px; color:rgba(232,238,252,.65)">(no explanation yet)</p>`
-            }
-
-            ${
-              source
-              ? `<p class="small" style="margin:0;">Source: <a href="${source}" target="_blank" rel="noreferrer">${source}</a></p>`
-              : ``
-            }
-          `;
-
-          cardsEl.appendChild(div);
+            <h3 style="margin:10px 0 6px">${title}</h3>
+            ${summary ? <p style="margin:0 0 10px; opacity:.9">${summary}</p>
+                      : <p style="margin:0 0 10px; opacity:.7">(no explanation yet)</p>}
+            ${source ? <p class="small">Source: <a href="${source}" target="_blank" rel="noreferrer">${source}</a></p> : `}
+          ;
+          cards.appendChild(div);
         });
+
+        status.textContent = "Status: OK (" + items.length + " items)";
+      }catch(e){
+        status.textContent = "Status: error";
+        document.getElementById("cards").innerHTML =
+          <div class="card">Failed to load <code>/api/latest</code>. Error: ${safe(e.message)}</div>`;
       }
+    }
 
-      async function loadLatest(){
-        setStatus("Status: fetching…");
-        btn.disabled = true;
-
-        try{
-          const apiUrl = window.location.origin + "/api/latest";
-          const res = await fetch(apiUrl, { cache: "no-store" });
-
-          if (!res.ok) throw new Error("HTTP " + res.status);
-
-          const data = await res.json();
-          const items = Array.isArray(data) ? data : (data.items || data.risks || []);
-
-          if (!items.length){
-            renderEmpty();
-            setStatus("Status: OK (0 items)");
-            return;
-          }
-
-          renderItems(items);
-          setStatus("Status: OK (" + items.length + " items)");
-        }catch(e){
-          renderError(e.message);
-          setStatus("Status: error");
-        }finally{
-          btn.disabled = false;
-        }
-      }
-
-      btn.addEventListener("click", loadLatest);
-      loadLatest();
-    });
+    document.getElementById("refreshBtn").addEventListener("click", loadLatest);
+    loadLatest();
   </script>
 </body>
 </html>
