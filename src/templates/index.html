@@ -22,30 +22,32 @@ async function loadData(){
   const container = document.getElementById("cards");
 
   try{
-    const res = await fetch("/api/latest");
-    const data = await res.json();
+    const res = await fetch("/api/latest", { cache: "no-store" });
+    if(!res.ok) throw new Error("HTTP " + res.status);
+
+    const payload = await res.json();
+    const data = Array.isArray(payload) ? payload : (payload.data  payload.items  []);
 
     container.innerHTML = "";
-    
+
     data.forEach(item => {
       const div = document.createElement("div");
       div.className = "card";
       div.innerHTML = 
-        <h2>${item.title}</h2>
-        <p>Risk: ${item.risk_level}</p>
-        <p>Score: ${item.risk_score}</p>
-        <p>${item.summary}</p>
+        <h2>${item.title ?? "No title"}</h2>
+        <p>Risk: ${item.risk_level ?? "-"}</p>
+        <p>Score: ${item.risk_score ?? "-"}</p>
+        <p>${item.summary ?? ""}</p>
       ;
       container.appendChild(div);
     });
 
-    status.textContent = "OK";
-  }
-  catch(e){
+    status.textContent = "OK (" + data.length + ")";
+  } catch(e){
+    console.log(e);
     status.textContent = "ERROR";
   }
 }
-
 loadData();
 </script>
 
