@@ -1,209 +1,124 @@
-import os
-import feedparser
-from datetime import datetime
-
-from fastapi import FastAPI, Request, Depends
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from datetime import datetime
+import feedparser
+import re
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
-from sqlalchemy.orm import sessionmaker, declarative_base, Session
-
-
-# -----------------------------
-# App + Templates
-# -----------------------------
 app = FastAPI(title="POLARIS Intel", version="1.0.0")
+
 templates = Jinja2Templates(directory="src/templates")
 
+# RSS manbalar (xohlasang keyin ko'paytiramiz)
+RSS_FEEDS = [
+    # Geopolitics / world
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "http://feeds.bbci.co.uk/news/world/rss.xml",
+    "http://feeds.bbci.co.uk/news/technology/rss.xml",
+    # Cyber-ish sources
+    "https://www.cisa.gov/uscert/ncas/alerts.xml",
+]
 
-# -----------------------------
-# Database (Postgres on Railway)
-# -----------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")
+# --- RISK SCORING (0-100) ---
+RISK_LEVELS = [
+    (80, "Critical"),
+    (60, "High"),
+    (30, "Medium"),
+    (0,  "Low"),
+]
 
-# Fallback: local run uchun SQLite (agar DATABASE_URL yo'q bo'lsa)
-if not DATABASE_URL:
-    DATABASE_URL = "sqlite:///./polaris.db"
+KEYWORDS = {
+    30: ["airstrike", "missile", "drone strike", "bombing", "invasion", "hostage", "killed", "dead"],
+    20: ["attack", "explosion", "clash", "escalation", "military", "terror", "evacuation"],
+    12: ["sanctions", "border", "mobilization", "warning", "threat", "tension", "rhetoric"],
 
-# SQLite uchun special arg
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+    30: ["ransomware", "zero-day", "0day", "data breach", "critical infrastructure"],
+    20: ["malware", "exploit", "ddos", "leak", "stolen", "credential", "phishing campaign"],
+    12: ["phishing", "ioc", "vulnerability", "incident", "compromised"],
+}
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+def compute_risk(title: str, summary: str) -> tuple[int, str, list[str]]:
+    text = f"{title} {summary}".lower().strip()
 
+    if len(text) < 10:
+        return 0, "Low", ["empty"]
 
-class Risk(Base):
-    __tablename__ = "risks"
+    score = 10  # baseline: 0 bo'lib qolmasin
+    signals = []
 
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False)
-    summary = Column(Text, nullable=True)
-    category = Column(String, nullable=True)       # Cyber / Geopolitics / Economic / Conflict
-    risk_score = Column(Integer, nullable=True)    # 0-100
-    risk_level = Column(String, nullable=True)     # Low/Medium/High/Critical
-    source = Column(String, nullable=True)
-    tags = Column(Text, nullable=True)             # comma-separated
-    created_at = Column(DateTime, default=datetime.utcnow)
+    for weight, words in KEYWORDS.items():
+        for w in words:
+            if w in text:
+                score += weight
+                signals.append(w)
 
+    # bonuslar
+    if re.search(r"\b(killed|dead|injured|casualties)\b", text):
+        score = int(score * 1.15)
+        signals.append("impact")
 
-Base.metadata.create_all(bind=engine)
+    if re.search(r"\b(breaking|urgent|live)\b", text):
+        score += 7
+        signals.append("urgent")
 
+    score = max(0, min(100, score))
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    level = "Low"
+    for threshold, name in RISK_LEVELS:
+        if score >= threshold:
+            level = name
+            break
 
+    return score, level, signals
 
-# -----------------------------
-# Routes
-# -----------------------------
+def guess_category(title: str, summary: str) -> str:
+    t = f"{title} {summary}".lower()
+    cyber_words = ["ransomware", "malware", "phishing", "zero-day", "breach", "ddos", "exploit", "vulnerability", "ioc"]
+    war_words = ["war", "attack", "airstrike", "missile", "drone", "invasion", "sanctions", "military", "ceasefire"]
+    if any(w in t for w in cyber_words):
+        return "Cyber"
+    if any(w in t for w in war_words):
+        return "Geopolitics"
+    return "General"
+
+def fetch_rss_items(limit: int = 20):
+    items = []
+    for url in RSS_FEEDS:
+        feed = feedparser.parse(url)
+        for e in feed.entries[:10]:
+            title = (e.get("title") or "").strip()
+            summary = (e.get("summary") or e.get("description") or "").strip()
+            link = e.get("link") or url
+
+            risk_score, risk_level, signals = compute_risk(title, summary)
+            category = guess_category(title, summary)
+
+            items.append({
+                "title": title[:180],
+                "summary": re.sub(r"\s+", " ", summary)[:220],
+                "category": category,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "source": link,
+                "tags": list(set(signals[:6] + ["rss", "auto"])),
+                "created_at": datetime.utcnow().isoformat(),
+            })
+
+    # risk bo'yicha saralash (eng xavfli yuqoriga)
+    items.sort(key=lambda x: x["risk_score"], reverse=True)
+    return items[:limit]
+
+# UI
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-
+# Health
 @app.get("/health", response_class=JSONResponse)
 def health():
     return {"status": "ok", "app": "polaris-intel"}
 
-
+# Latest
 @app.get("/api/latest", response_class=JSONResponse)
-def api_latest(db: Session = Depends(get_db)):
-    risks = db.query(Risk).order_by(Risk.created_at.desc()).limit(30).all()
-    return [
-        {
-            "title": r.title,
-            "summary": r.summary or "",
-            "category": r.category or "",
-            "risk_score": r.risk_score if r.risk_score is not None else 0,
-            "risk_level": r.risk_level or "",
-            "source": r.source or "",
-            "tags": [t.strip() for t in (r.tags or "").split(",") if t.strip()],
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in risks
-    ]
-
-
-# (Optional) Demo data qo'shish: 1 marta chaqirasan, keyin UI da chiqadi
-@app.post("/api/seed", response_class=JSONResponse)
-def seed(db: Session = Depends(get_db)):
-    # Agar DB bo'sh bo'lsa seed qiladi
-    exists = db.query(Risk).first()
-    if exists:
-        return {"ok": True, "seeded": False, "reason": "already_has_data"}
-
-    demo = [
-        Risk(
-            title="Sample cyber threat detected",
-            summary="Suspicious activity indicates possible credential abuse. Investigate logs and alerts.",
-            category="Cyber",
-            risk_score=78,
-            risk_level="High",
-            source="https://example.com/cyber-alert",
-            tags="phishing,credentials,ioc",
-        ),
-        Risk(
-            title="Geopolitical tension rising in region",
-            summary="Diplomatic friction and increased rhetoric suggest elevated escalation risk.",
-            category="Geopolitics",
-            risk_score=65,
-            risk_level="Medium",
-            source="https://example.com/geopolitics-brief",
-            tags="diplomacy,trade,monitor",
-        ),
-    ]
-    db.add_all(demo)
-    db.commit()
-    return {"ok": True, "seeded": True, "count": len(demo)}
-# -----------------------------
-# SIMPLE RISK SCORING ENGINE
-# -----------------------------
-KEYWORD_WEIGHTS = {
-    "war": 25,
-    "conflict": 20,
-    "attack": 20,
-    "cyber": 15,
-    "missile": 25,
-    "nuclear": 40,
-    "sanction": 15,
-    "military": 20,
-    "invasion": 35,
-    "escalation": 30,
-    "tension": 15,
-    "retaliation": 25,
-}
-
-
-def calculate_risk_score(text: str):
-    score = 0
-    text_lower = text.lower()
-
-    for word, weight in KEYWORD_WEIGHTS.items():
-        if word in text_lower:
-            score += weight
-
-    if score >= 80:
-        level = "Critical"
-    elif score >= 60:
-        level = "High"
-    elif score >= 30:
-        level = "Medium"
-    else:
-        level = "Low"
-
-    return min(score, 100), level
-
-
-# -----------------------------
-# RSS COLLECTOR
-# -----------------------------
-RSS_FEEDS = [
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://www.reutersagency.com/feed/?best-topics=politics",
-]
-
-
-@app.post("/api/collect")
-def collect_rss(db: Session = Depends(get_db)):
-    new_items = 0
-
-    for feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
-
-        for entry in feed.entries[:10]:
-            title = entry.get("title", "")
-            summary = entry.get("summary", "")
-            link = entry.get("link", "")
-
-            combined_text = f"{title} {summary}"
-
-            # Duplicate check
-            existing = db.query(Risk).filter(Risk.source == link).first()
-            if existing:
-                continue
-
-            score, level = calculate_risk_score(combined_text)
-
-            risk = Risk(
-                title=title,
-                summary=summary[:500],
-                category="Geopolitics",
-                risk_score=score,
-                risk_level=level,
-                source=link,
-                tags="rss,auto",
-            )
-
-            db.add(risk)
-            new_items += 1
-
-    db.commit()
-
-    return {"collected": new_items}
+def api_latest():
+    return fetch_rss_items(limit=20)
