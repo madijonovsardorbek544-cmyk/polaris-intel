@@ -89,7 +89,7 @@ def fetch_rss_items(limit: int = 20):
             title = (e.get("title") or "").strip()
             summary = (e.get("summary") or e.get("description") or "").strip()
             link = e.get("link") or url
-
+summary = re.sub(r"<[^>]+>", "", summary)
             risk_score, risk_level, signals = compute_risk(title, summary)
             category = guess_category(title, summary)
 
