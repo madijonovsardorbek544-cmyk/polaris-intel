@@ -1,4 +1,5 @@
 import os
+import feedparser
 from datetime import datetime
 
 from fastapi import FastAPI, Request, Depends
@@ -120,3 +121,89 @@ def seed(db: Session = Depends(get_db)):
     db.add_all(demo)
     db.commit()
     return {"ok": True, "seeded": True, "count": len(demo)}
+# -----------------------------
+# SIMPLE RISK SCORING ENGINE
+# -----------------------------
+KEYWORD_WEIGHTS = {
+    "war": 25,
+    "conflict": 20,
+    "attack": 20,
+    "cyber": 15,
+    "missile": 25,
+    "nuclear": 40,
+    "sanction": 15,
+    "military": 20,
+    "invasion": 35,
+    "escalation": 30,
+    "tension": 15,
+    "retaliation": 25,
+}
+
+
+def calculate_risk_score(text: str):
+    score = 0
+    text_lower = text.lower()
+
+    for word, weight in KEYWORD_WEIGHTS.items():
+        if word in text_lower:
+            score += weight
+
+    if score >= 80:
+        level = "Critical"
+    elif score >= 60:
+        level = "High"
+    elif score >= 30:
+        level = "Medium"
+    else:
+        level = "Low"
+
+    return min(score, 100), level
+
+
+# -----------------------------
+# RSS COLLECTOR
+# -----------------------------
+RSS_FEEDS = [
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://www.reutersagency.com/feed/?best-topics=politics",
+]
+
+
+@app.post("/api/collect")
+def collect_rss(db: Session = Depends(get_db)):
+    new_items = 0
+
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
+
+        for entry in feed.entries[:10]:
+            title = entry.get("title", "")
+            summary = entry.get("summary", "")
+            link = entry.get("link", "")
+
+            combined_text = f"{title} {summary}"
+
+            # Duplicate check
+            existing = db.query(Risk).filter(Risk.source == link).first()
+            if existing:
+                continue
+
+            score, level = calculate_risk_score(combined_text)
+
+            risk = Risk(
+                title=title,
+                summary=summary[:500],
+                category="Geopolitics",
+                risk_score=score,
+                risk_level=level,
+                source=link,
+                tags="rss,auto",
+            )
+
+            db.add(risk)
+            new_items += 1
+
+    db.commit()
+
+    return {"collected": new_items}
