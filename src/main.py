@@ -1,7 +1,10 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from src.core.database import Base, engine
+from src.models.risk import Risk
 
+Base.metadata.create_all(bind=engine)
 app = FastAPI(title="POLARIS Intel", version="0.1.0")
 
 # Jinja templates path (senda: src/templates/index.html bor)
