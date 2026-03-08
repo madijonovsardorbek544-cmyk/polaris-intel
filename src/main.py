@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -8,35 +7,27 @@ import re
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
-# -----------------------------
+# =========================================================
 # CONFIG
-# -----------------------------
+# =========================================================
 
 APP_NAME = "POLARIS Intel"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 
-# How many items to keep/display
 MAX_ITEMS = int(os.getenv("MAX_ITEMS", "60"))
-
-# Auto refresh interval for RSS fetch (seconds)
 AUTO_REFRESH_SECONDS = int(os.getenv("AUTO_REFRESH_SECONDS", "900"))  # 15 min
-
-# Request timeout
-HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "12.0"))
-
-# Set to "1" to disable background refresh
+HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "15.0"))
 DISABLE_BG_REFRESH = os.getenv("DISABLE_BG_REFRESH", "0") == "1"
 
-# RSS sources (cyber + geopolitics). Add/remove safely.
 DEFAULT_FEEDS = [
-    # Cyber / Vulnerabilities
+    # Cyber
     "https://www.cisa.gov/news-events/cybersecurity-advisories.xml",
     "https://www.cisa.gov/news-events/alerts.xml",
     "https://www.cisa.gov/news-events/ics-advisories.xml",
@@ -44,20 +35,18 @@ DEFAULT_FEEDS = [
     "https://feeds.feedburner.com/TheHackersNews",
     "https://www.darkreading.com/rss.xml",
 
-    # Geopolitics / World
+    # Geopolitics / world
     "https://www.aljazeera.com/xml/rss/all.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
     "https://www.reutersagency.com/feed/?best-topics=world&post_type=best",
 ]
 
-# You can override feeds with env var (comma-separated)
 ENV_FEEDS = os.getenv("FEEDS", "").strip()
-FEEDS = [f.strip() for f in ENV_FEEDS.split(",") if f.strip()] if ENV_FEEDS else DEFAULT_FEEDS
+FEEDS = [x.strip() for x in ENV_FEEDS.split(",") if x.strip()] if ENV_FEEDS else DEFAULT_FEEDS
 
-
-# -----------------------------
+# =========================================================
 # DATA MODEL
-# -----------------------------
+# =========================================================
 
 @dataclass
 class IntelItem:
@@ -67,31 +56,30 @@ class IntelItem:
     risk_score: int
     risk_level: str
     source: str
+    source_host: str
     tags: List[str]
     created_at: str
 
 
-# -----------------------------
-# APP
-# -----------------------------
+# =========================================================
+# APP + STORE
+# =========================================================
 
 app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
-# In-memory store
 _STORE: List[IntelItem] = []
 _LAST_REFRESH_TS: float = 0.0
 _LAST_REFRESH_STATUS: str = "cold"
 _LOCK = asyncio.Lock()
 
+# =========================================================
+# REGEX / UTILS
+# =========================================================
 
-# -----------------------------
-# UTILITIES
-# -----------------------------
-
-_TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"\s+")
-_URL_RE = re.compile(r"https?://\S+")
-_CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.IGNORECASE)
+TAG_RE = re.compile(r"<[^>]+>")
+SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.I | re.S)
+WS_RE = re.compile(r"\s+")
+CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,7}\b", re.I)
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -99,39 +87,19 @@ def now_iso() -> str:
 def clamp_int(x: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, x))
 
-def uniq_keep_order(seq: List[str]) -> List[str]:
+def uniq_keep_order(values: List[str]) -> List[str]:
     seen = set()
     out = []
-    for s in seq:
-        k = s.strip()
-        if not k:
+    for v in values:
+        v = (v or "").strip()
+        if not v:
             continue
-        if k.lower() in seen:
+        key = v.lower()
+        if key in seen:
             continue
-        seen.add(k.lower())
-        out.append(k)
+        seen.add(key)
+        out.append(v)
     return out
-
-def strip_html(s: str) -> str:
-    """Make messy HTML summaries readable & safe."""
-    if not s:
-        return ""
-    # Unescape entities first
-    s = html_lib.unescape(s)
-    # Remove tags
-    s = _TAG_RE.sub(" ", s)
-    # Collapse whitespace
-    s = _WS_RE.sub(" ", s).strip()
-    return s
-
-def shorten(s: str, limit: int = 360) -> str:
-    s = (s or "").strip()
-    if len(s) <= limit:
-        return s
-    cut = s[:limit]
-    if " " in cut:
-        cut = cut.rsplit(" ", 1)[0]
-    return cut + "…"
 
 def host_of(url: str) -> str:
     try:
@@ -139,39 +107,122 @@ def host_of(url: str) -> str:
     except Exception:
         return ""
 
-def classify_category(title: str, summary: str, source: str) -> str:
-    t = f"{title} {summary} {source}".lower()
-    cyber_keywords = [
-        "cve", "vulnerability", "exploit", "ransomware", "malware", "phishing", "zero-day",
-        "ics", "scada", "botnet", "breach", "leak", "credential", "patch", "advisory", "cisa",
-        "mitre", "nvd", "xss", "rce", "sql injection", "ddos"
-    ]
-    geo_keywords = [
-        "war", "conflict", "strike", "missile", "drone", "ceasefire", "invasion", "sanction",
-        "diplomatic", "election", "border", "military", "attack", "tension", "protest", "coup"
-    ]
-    cyber = any(k in t for k in cyber_keywords)
-    geo = any(k in t for k in geo_keywords)
+def strip_html(text: str) -> str:
+    if not text:
+        return ""
+    text = html_lib.unescape(text)
+    text = SCRIPT_STYLE_RE.sub(" ", text)
+    text = TAG_RE.sub(" ", text)
+    text = WS_RE.sub(" ", text).strip()
+    return text
 
-    if cyber and not geo:
-        return "Cyber"
-    if geo and not cyber:
-        return "Geopolitics"
-    if cyber and geo:
+def shorten(text: str, limit: int = 260) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut + "…"
+
+def display_source(url: str) -> str:
+    """
+    User ko‘rishi uchun source ni chiroyli qisqartiradi.
+    """
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc
+        path = parsed.path or ""
+        short = host + path
+        if len(short) > 70:
+            short = short[:67] + "..."
+        return short
+    except Exception:
+        return url[:70] + ("..." if len(url) > 70 else "")
+
+def safe_text(x: Any) -> str:
+    return strip_html(str(x or "")).strip()
+
+# =========================================================
+# RSS / ATOM PARSER
+# =========================================================
+
+def parse_rss_xml(xml_text: str, fallback_source: str) -> List[Dict[str, str]]:
+    """
+    Minimal RSS / Atom parser using regex.
+    """
+    blocks = re.findall(r"<item\b.*?>.*?</item>", xml_text, flags=re.I | re.S)
+    if not blocks:
+        blocks = re.findall(r"<entry\b.*?>.*?</entry>", xml_text, flags=re.I | re.S)
+
+    def pick(tag: str, block: str) -> str:
+        m = re.search(rf"<{tag}\b.*?>(.*?)</{tag}>", block, flags=re.I | re.S)
+        return m.group(1) if m else ""
+
+    out = []
+    for block in blocks[:MAX_ITEMS]:
+        title = pick("title", block)
+        link = pick("link", block).strip()
+
+        if not link:
+            m = re.search(r"<link\b[^>]*href=['\"]([^'\"]+)['\"]", block, flags=re.I)
+            if m:
+                link = m.group(1).strip()
+
+        summary = (
+            pick("description", block)
+            or pick("summary", block)
+            or pick("content", block)
+            or pick("content:encoded", block)
+        )
+
+        out.append({
+            "title": safe_text(title),
+            "summary": safe_text(summary),
+            "link": link or fallback_source,
+        })
+    return out
+
+# =========================================================
+# CLASSIFICATION / TAGS / RISK
+# =========================================================
+
+def classify_category(title: str, summary: str, source: str) -> str:
+    text = f"{title} {summary} {source}".lower()
+
+    cyber_keywords = [
+        "cve", "vulnerability", "exploit", "ransomware", "malware", "phishing",
+        "zero-day", "0day", "credential", "breach", "leak", "patch", "advisory",
+        "ics", "scada", "ddos", "xss", "rce", "botnet", "cisa"
+    ]
+
+    geo_keywords = [
+        "war", "conflict", "missile", "drone", "strike", "attack", "airstrike",
+        "ceasefire", "military", "government", "border", "election",
+        "diplomatic", "sanction", "tension", "escalation", "nuclear"
+    ]
+
+    is_cyber = any(k in text for k in cyber_keywords)
+    is_geo = any(k in text for k in geo_keywords)
+
+    if is_cyber and is_geo:
         return "Hybrid"
+    if is_cyber:
+        return "Cyber"
+    if is_geo:
+        return "Geopolitics"
     return "General"
 
 def extract_tags(title: str, summary: str, source: str) -> List[str]:
-    t = f"{title} {summary}".lower()
+    text = f"{title} {summary}".lower()
     tags: List[str] = []
 
-    # CVEs
-    cves = _CVE_RE.findall(f"{title} {summary}")
-    for c in cves[:6]:
-        tags.append(c.upper())
+    for cve in CVE_RE.findall(f"{title} {summary}")[:6]:
+        tags.append(cve.upper())
 
-    # keyword tags
-    key_map = {
+    keyword_map = {
         "ransomware": "ransomware",
         "phishing": "phishing",
         "credential": "credentials",
@@ -179,119 +230,127 @@ def extract_tags(title: str, summary: str, source: str) -> List[str]:
         "breach": "breach",
         "exploit": "exploit",
         "zero-day": "0day",
+        "0day": "0day",
         "ddos": "ddos",
-        "sanction": "sanctions",
-        "ceasefire": "ceasefire",
         "missile": "missile",
         "drone": "drone",
-        "election": "election",
+        "sanction": "sanctions",
+        "ceasefire": "ceasefire",
         "diplomatic": "diplomacy",
+        "election": "election",
+        "malware": "malware",
+        "ics": "ics",
+        "scada": "scada",
     }
-    for k, v in key_map.items():
-        if k in t:
+
+    for k, v in keyword_map.items():
+        if k in text:
             tags.append(v)
 
-    # source host tag
     h = host_of(source)
-    if h:
-        if "cisa.gov" in h:
-            tags.append("cisa")
-        elif "aljazeera" in h:
-            tags.append("aljazeera")
-        elif "bbc" in h:
-            tags.append("bbc")
-        elif "reuters" in h:
-            tags.append("reuters")
+    if "cisa.gov" in h:
+        tags.append("cisa")
+    elif "aljazeera" in h:
+        tags.append("aljazeera")
+    elif "bbc" in h:
+        tags.append("bbc")
+    elif "reuters" in h:
+        tags.append("reuters")
+    elif "bleepingcomputer" in h:
+        tags.append("bleepingcomputer")
+    elif "thehackernews" in h or "feedburner" in h:
+        tags.append("thehackernews")
+    elif "darkreading" in h:
+        tags.append("darkreading")
 
     return uniq_keep_order(tags)
 
 def score_risk(title: str, summary: str, source: str, category: str) -> int:
-    """
-    0-100 risk score:
-    - Cyber: use CVEs / severity words / exploit indicators
-    - Geopolitics: escalation words / casualties indicators (not graphic) / major actors keywords
-    - Hybrid: combined weights
-    """
-    t = f"{title} {summary}".lower()
-    h = host_of(source)
+    text = f"{title} {summary}".lower()
+    host = host_of(source)
 
-    score = 12  # baseline so almost never 0
+    score = 18
 
-    # Trust / authority bumps (not "truth", just impact relevance)
-    if "cisa.gov" in h:
+    # Source credibility / impact
+    if "cisa.gov" in host:
         score += 18
-    if "ics" in t or "scada" in t:
+    elif "reuters" in host or "bbc" in host or "aljazeera" in host:
+        score += 8
+    elif "bleepingcomputer" in host or "darkreading" in host or "thehackernews" in host:
         score += 10
 
-    # CVE presence
-    cve_count = len(_CVE_RE.findall(f"{title} {summary}"))
+    # CVEs
+    cve_count = len(CVE_RE.findall(f"{title} {summary}"))
     if cve_count:
-        score += 8 + min(18, cve_count * 6)
+        score += 10 + min(20, cve_count * 5)
 
-    # cyber severity words
     cyber_weights = {
-        "critical": 26,
-        "high": 18,
-        "severe": 16,
-        "rce": 22,
-        "remote code execution": 22,
-        "actively exploited": 26,
-        "known exploited": 22,
-        "zero-day": 26,
-        "0day": 26,
-        "wormable": 24,
-        "ransomware": 26,
-        "breach": 18,
-        "data leak": 16,
-        "leak": 12,
+        "critical": 24,
+        "actively exploited": 24,
+        "known exploited": 20,
+        "zero-day": 22,
+        "0day": 22,
+        "rce": 18,
+        "remote code execution": 20,
+        "exploit": 14,
+        "ransomware": 22,
+        "malware": 12,
         "phishing": 10,
         "credential": 12,
-        "botnet": 14,
+        "breach": 16,
+        "leak": 10,
         "ddos": 10,
-        "patch now": 10,
-        "urgent": 12,
+        "ics": 10,
+        "scada": 10,
+        "urgent": 8,
+        "patch": 6,
     }
-    for k, w in cyber_weights.items():
-        if k in t:
-            score += w
 
-    # geopolitics escalation words
     geo_weights = {
-        "airstrike": 16,
+        "war": 18,
+        "conflict": 12,
+        "missile": 18,
+        "drone": 14,
         "strike": 12,
-        "missile": 16,
-        "drone": 12,
+        "airstrike": 16,
         "attack": 12,
-        "invasion": 20,
-        "mobilization": 14,
-        "sanction": 10,
-        "ceasefire": 6,
-        "tension": 8,
+        "military": 10,
+        "border": 8,
+        "nuclear": 20,
+        "sanction": 8,
+        "ceasefire": 5,
         "escalation": 14,
-        "nuclear": 18,
+        "tension": 8,
+        "election": 8,
+        "government": 6,
     }
-    for k, w in geo_weights.items():
-        if k in t:
-            score += w
 
-    # major actor bump (keeps geopolitics not always low)
-    major_actors = ["iran", "israel", "russia", "ukraine", "china", "taiwan", "nato", "un", "us ", "u.s."]
-    if any(a in t for a in major_actors):
+    for key, weight in cyber_weights.items():
+        if key in text:
+            score += weight
+
+    for key, weight in geo_weights.items():
+        if key in text:
+            score += weight
+
+    major_actors = [
+        "iran", "israel", "russia", "ukraine", "china", "taiwan",
+        "nato", "united states", "u.s.", "us ", "europe", "eu"
+    ]
+    if any(actor in text for actor in major_actors):
         score += 8
 
-    # category shaping
-    if category == "Cyber":
-        score += 6
-    elif category == "Geopolitics":
-        score += 4
-    elif category == "Hybrid":
-        score += 10
-
-    # If text explicitly says "no imminent threat" reduce a bit
-    if "no imminent threat" in t:
+    if "no imminent threat" in text:
         score -= 10
 
-    return clamp_int(score, 0, 100)
+    if category == "Hybrid":
+        score += 10
+    elif category == "Cyber":
+        score += 6
+    elif category == "Geopolitics":
+        score += 5
+
+    return clamp_int(score, 20, 100)
 
 def risk_level(score: int) -> str:
     if score >= 85:
@@ -304,91 +363,61 @@ def risk_level(score: int) -> str:
 
 def dedupe_items(items: List[IntelItem]) -> List[IntelItem]:
     seen = set()
-    out: List[IntelItem] = []
-    for it in items:
-        key = (it.title.strip().lower(), it.source.strip().lower())
+    out = []
+    for item in items:
+        key = (item.title.strip().lower(), item.source.strip().lower())
         if key in seen:
             continue
         seen.add(key)
-        out.append(it)
+        out.append(item)
     return out
 
-def safe_text(x: Any) -> str:
-    return strip_html(str(x or "")).strip()
-
-def parse_rss_xml(xml_text: str, fallback_source: str) -> List[Dict[str, str]]:
-    """
-    Minimal RSS/Atom parsing without external libs:
-    - Find <item> or <entry>
-    - Extract title, link, description/summary/content
-    """
-    txt = xml_text
-
-    # choose blocks: RSS item or Atom entry
-    blocks = re.findall(r"<item\b.*?>.*?</item>", txt, flags=re.DOTALL | re.IGNORECASE)
-    if not blocks:
-        blocks = re.findall(r"<entry\b.*?>.*?</entry>", txt, flags=re.DOTALL | re.IGNORECASE)
-
-    def _pick(tag: str, block: str) -> str:
-        m = re.search(rf"<{tag}\b.*?>(.*?)</{tag}>", block, flags=re.DOTALL | re.IGNORECASE)
-        return m.group(1) if m else ""
-
-    out = []
-    for b in blocks[:MAX_ITEMS]:
-        title = _pick("title", b)
-        link = ""
-        # RSS link
-        l = _pick("link", b)
-        if l.strip():
-            link = l.strip()
-        else:
-            # Atom link href
-            m = re.search(r"<link\b[^>]*href=['\"]([^'\"]+)['\"]", b, flags=re.IGNORECASE)
-            if m:
-                link = m.group(1).strip()
-
-        desc = _pick("description", b) or _pick("summary", b) or _pick("content", b)
-        out.append({
-            "title": safe_text(title),
-            "link": link.strip() or fallback_source,
-            "summary": safe_text(desc),
-        })
-    return out
-
-
-# -----------------------------
-# FETCH + BUILD ITEMS
-# -----------------------------
+# =========================================================
+# FETCH
+# =========================================================
 
 async def fetch_feed(client: httpx.AsyncClient, feed_url: str) -> List[IntelItem]:
     try:
-        r = await client.get(feed_url, timeout=HTTP_TIMEOUT, headers={"User-Agent": "POLARIS-Intel/1.0"})
-        r.raise_for_status()
-        entries = parse_rss_xml(r.text, fallback_source=feed_url)
-        items: List[IntelItem] = []
-        for e in entries:
-            title = e.get("title", "").strip()
+        resp = await client.get(
+            feed_url,
+            timeout=HTTP_TIMEOUT,
+            headers={"User-Agent": "POLARIS-Intel/2.0"}
+        )
+        resp.raise_for_status()
+
+        entries = parse_rss_xml(resp.text, fallback_source=feed_url)
+        results: List[IntelItem] = []
+
+        for entry in entries:
+            title = entry.get("title", "").strip()
             if not title:
                 continue
-            summary = e.get("summary", "").strip()
-            source = e.get("link", feed_url).strip() or feed_url
 
-            cat = classify_category(title, summary, source)
+            raw_summary = entry.get("summary", "")
+            summary = shorten(strip_html(raw_summary), 260)
+            source = entry.get("link", feed_url).strip() or feed_url
+
+            category = classify_category(title, summary, source)
             tags = extract_tags(title, summary, source)
-            score = score_risk(title, summary, source, cat)
-            lvl = risk_level(score)
+            score = score_risk(title, summary, source, category)
+            level = risk_level(score)
 
-            items.append(IntelItem(
-                title=title,
-                summary=summary,
-                category=cat,
-                risk_score=score,
-                risk_level=lvl,
-                source=source,
-                tags=tags,
-                created_at=now_iso(),
-            ))
-        return items
+            results.append(
+                IntelItem(
+                    title=title,
+                    summary=summary,
+                    category=category,
+                    risk_score=score,
+                    risk_level=level,
+                    source=source,
+                    source_host=display_source(source),
+                    tags=tags[:8],
+                    created_at=now_iso(),
+                )
+            )
+
+        return results
+
     except Exception:
         return []
 
@@ -400,18 +429,17 @@ async def refresh_store(force: bool = False) -> Dict[str, Any]:
         if not force and (now - _LAST_REFRESH_TS) < AUTO_REFRESH_SECONDS and _STORE:
             return {"ok": True, "status": "cached", "items": len(_STORE)}
 
-        _LAST_REFRESH_STATUS = "loading"
         _LAST_REFRESH_TS = now
+        _LAST_REFRESH_STATUS = "loading"
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        tasks = [fetch_feed(client, u) for u in FEEDS]
+        tasks = [fetch_feed(client, url) for url in FEEDS]
         results = await asyncio.gather(*tasks)
 
     merged: List[IntelItem] = []
     for arr in results:
         merged.extend(arr)
 
-    # Clean & dedupe & sort by score desc
     merged = dedupe_items(merged)
     merged.sort(key=lambda x: x.risk_score, reverse=True)
     merged = merged[:MAX_ITEMS]
@@ -433,14 +461,12 @@ async def bg_loop():
 
 @app.on_event("startup")
 async def on_startup():
-    # initial warm-up (non-blocking)
     asyncio.create_task(refresh_store(force=True))
     asyncio.create_task(bg_loop())
 
-
-# -----------------------------
-# ROUTES
-# -----------------------------
+# =========================================================
+# API ROUTES
+# =========================================================
 
 @app.get("/health")
 async def health():
@@ -461,12 +487,11 @@ async def api_latest():
 
 @app.post("/api/refresh")
 async def api_refresh():
-    info = await refresh_store(force=True)
-    return JSONResponse(info)
+    data = await refresh_store(force=True)
+    return JSONResponse(data)
 
 @app.post("/api/seed")
 async def api_seed():
-    # fallback seed to demonstrate UI even if feeds fail
     demo = [
         IntelItem(
             title="Sample cyber threat detected",
@@ -475,6 +500,7 @@ async def api_seed():
             risk_score=78,
             risk_level="High",
             source="https://example.com/cyber-alert",
+            source_host="example.com/cyber-alert",
             tags=["phishing", "credentials", "ioc"],
             created_at=now_iso(),
         ),
@@ -485,19 +511,32 @@ async def api_seed():
             risk_score=65,
             risk_level="High",
             source="https://example.com/geopolitics-brief",
+            source_host="example.com/geopolitics-brief",
             tags=["diplomacy", "trade", "monitor"],
             created_at=now_iso(),
         ),
     ]
+
     async with _LOCK:
         global _STORE, _LAST_REFRESH_STATUS
         _STORE = demo
         _LAST_REFRESH_STATUS = "OK (seeded)"
+
     return JSONResponse({"ok": True, "seeded": len(demo)})
+
+@app.get("/latest")
+async def latest_help():
+    return JSONResponse(
+        {"detail": "Use /api/latest for JSON or / for UI."},
+        status_code=404
+    )
+
+# =========================================================
+# UI
+# =========================================================
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    # Ensure we have data, but never crash the page
     try:
         await refresh_store(force=False)
     except Exception:
@@ -508,184 +547,241 @@ async def home():
         status = _LAST_REFRESH_STATUS
         count = len(items)
 
-    # Build cards HTML safely
-    cards = []
-    for it in items:
-        # display-safe
-        title = html_lib.escape(it.title)
-        summary = html_lib.escape(shorten(strip_html(it.summary)))
-        category = html_lib.escape(it.category)
-        lvl = html_lib.escape(it.risk_level)
-        src = html_lib.escape(it.source)
-        score = it.risk_score
+    cards_html_parts = []
 
-        tag_html = ""
-        for tg in it.tags[:8]:
-            tag_html += f'<span class="tag">#{html_lib.escape(tg)}</span>'
+    for item in items:
+        title = html_lib.escape(item.title)
+        summary = html_lib.escape(item.summary)
+        category = html_lib.escape(item.category)
+        level = html_lib.escape(item.risk_level)
+        score = item.risk_score
+        src_url = html_lib.escape(item.source)
+        src_show = html_lib.escape(item.source_host)
 
-        cards.append(f"""
-          <article class="card">
+        tags_html = "".join(
+            f'<span class="tag">#{html_lib.escape(tag)}</span>'
+            for tag in item.tags[:6]
+        )
+
+        cards_html_parts.append(f"""
+        <article class="card">
+          <div class="card-top">
             <h3 class="title">{title}</h3>
             <p class="summary">{summary}</p>
-            <div class="meta">
-              <span class="pill {lvl.lower()}">Risk: {lvl} ({score})</span>
-              <span class="pill ghost">{category}</span>
-              {tag_html}
-            </div>
-            <div class="source">Source: <a href="{src}" target="_blank" rel="noopener noreferrer">{src}</a></div>
-          </article>
+          </div>
+
+          <div class="meta">
+            <span class="pill {level.lower()}">Risk: {level} ({score})</span>
+            <span class="pill ghost">{category}</span>
+            {tags_html}
+          </div>
+
+          <div class="source">
+            <span class="source-label">Source:</span>
+            <a href="{src_url}" target="_blank" rel="noopener noreferrer">{src_show}</a>
+          </div>
+        </article>
         """)
 
-    cards_html = "\n".join(cards) if cards else """
-      <article class="card empty">
-        <h3 class="title">No items</h3>
-        <p class="summary">Nothing fetched yet. Try <b>Reload</b> or call <code>/api/refresh</code>.</p>
-        <div class="meta"><span class="pill ghost">empty</span></div>
-      </article>
-    """
+    if cards_html_parts:
+        cards_html = "\n".join(cards_html_parts)
+    else:
+        cards_html = """
+        <article class="card empty">
+          <div class="card-top">
+            <h3 class="title">No items</h3>
+            <p class="summary">Nothing fetched yet. Press Reload or use POST /api/refresh.</p>
+          </div>
+          <div class="meta">
+            <span class="pill ghost">empty</span>
+          </div>
+        </article>
+        """
 
-    # HTML
     html = f"""
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{APP_NAME}</title>
   <style>
     :root {{
-      --bg0:#070b14;
-      --bg1:#0b1224;
-      --card:#0b1732;
-      --card2:#09142b;
+      --bg0: #060b16;
+      --bg1: #0a1224;
+      --card: rgba(255,255,255,0.045);
       --line: rgba(255,255,255,0.08);
-      --text: rgba(255,255,255,0.92);
-      --muted: rgba(255,255,255,0.62);
-      --accent: #6ea8fe;
-      --shadow: 0 16px 40px rgba(0,0,0,0.35);
+      --text: rgba(255,255,255,0.95);
+      --muted: rgba(255,255,255,0.65);
+      --blue: #84b6ff;
+      --shadow: 0 16px 40px rgba(0,0,0,0.34);
       --radius: 18px;
     }}
 
-    * {{ box-sizing: border-box; }}
+    * {{
+      box-sizing: border-box;
+    }}
+
     body {{
       margin: 0;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
       color: var(--text);
-      background: radial-gradient(900px 500px at 30% 10%, #111c3d 0%, var(--bg0) 50%) , linear-gradient(180deg, var(--bg0), var(--bg1));
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:
+        radial-gradient(900px 520px at 20% 0%, #122149 0%, rgba(18,33,73,0) 55%),
+        linear-gradient(180deg, var(--bg0), var(--bg1));
       min-height: 100vh;
     }}
 
     .wrap {{
-      max-width: 1400px;
+      max-width: 1440px;
       margin: 0 auto;
-      padding: 28px 18px 44px;
+      padding: 26px 18px 42px;
     }}
 
     .hero {{
-      display:flex;
-      flex-direction:column;
-      gap: 10px;
       margin-bottom: 16px;
     }}
 
     h1 {{
-      margin: 0;
-      font-size: clamp(34px, 5vw, 64px);
-      letter-spacing: 0.5px;
+      margin: 0 0 8px;
+      font-size: clamp(40px, 7vw, 72px);
+      line-height: 1.02;
+      letter-spacing: -0.02em;
     }}
 
     .status {{
       color: var(--muted);
-      font-size: 14px;
+      font-size: 15px;
+      margin-bottom: 16px;
     }}
 
     .toolbar {{
-      display:flex;
-      gap: 10px;
-      align-items:center;
+      display: flex;
+      gap: 12px;
       flex-wrap: wrap;
-      margin: 14px 0 18px;
+      align-items: center;
+      margin-bottom: 18px;
     }}
 
     button {{
-      background: rgba(110,168,254,0.16);
+      border: 1px solid rgba(132,182,255,0.24);
+      background: rgba(132,182,255,0.14);
       color: var(--text);
-      border: 1px solid rgba(110,168,254,0.24);
-      padding: 10px 14px;
+      padding: 11px 16px;
       border-radius: 12px;
       cursor: pointer;
-      font-weight: 600;
+      font-weight: 700;
       box-shadow: var(--shadow);
     }}
+
     button:hover {{
-      border-color: rgba(110,168,254,0.5);
-      background: rgba(110,168,254,0.2);
+      background: rgba(132,182,255,0.19);
+      border-color: rgba(132,182,255,0.4);
     }}
 
     input {{
       flex: 1;
       min-width: 220px;
-      background: rgba(255,255,255,0.06);
+      padding: 12px 14px;
+      border-radius: 14px;
       border: 1px solid var(--line);
+      background: rgba(255,255,255,0.045);
       color: var(--text);
-      padding: 11px 12px;
-      border-radius: 12px;
       outline: none;
+      font-size: 15px;
     }}
+
     input:focus {{
-      border-color: rgba(110,168,254,0.45);
+      border-color: rgba(132,182,255,0.38);
     }}
 
     .grid {{
-      display:grid;
+      display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
+      gap: 16px;
+      align-items: stretch;
     }}
 
-    @media (max-width: 1050px) {{
-      .grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    @media (max-width: 1100px) {{
+      .grid {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }}
     }}
-    @media (max-width: 680px) {{
-      .grid {{ grid-template-columns: 1fr; }}
+
+    @media (max-width: 700px) {{
+      .wrap {{
+        padding: 20px 14px 34px;
+      }}
+
+      .grid {{
+        grid-template-columns: 1fr;
+      }}
+
+      h1 {{
+        font-size: clamp(34px, 12vw, 56px);
+      }}
     }}
 
     .card {{
-      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
-      border: 1px solid var(--line);
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+       justify-content: space-between;
+      gap: 12px;
+      padding: 18px 18px 16px;
       border-radius: var(--radius);
-      padding: 16px 16px 14px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.03));
       box-shadow: var(--shadow);
       overflow: hidden;
+    }}
+
+    .card-top {{
+      min-width: 0;
     }}
 
     .title {{
       margin: 0 0 10px;
       font-size: 18px;
-      line-height: 1.25;
+      line-height: 1.28;
+      font-weight: 800;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }}
 
-    /* IMPORTANT: prevents messy layout */
     .summary {{
+      margin: 0;
       color: rgba(255,255,255,0.78);
       font-size: 14.5px;
-      line-height: 1.5;
-
-      overflow-wrap: anywhere;
+      line-height: 1.55;
+      min-width: 0;
       word-break: break-word;
+      overflow-wrap: anywhere;
 
       display: -webkit-box;
       -webkit-line-clamp: 5;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      margin: 0 0 12px;
     }}
 
     .meta {{
-      display:flex;
+      display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      align-items:center;
-      margin-bottom: 10px;
+      align-items: center;
+      min-width: 0;
+    }}
+
+    .pill, .tag {{
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }}
 
     .pill {{
@@ -694,8 +790,7 @@ async def home():
       border-radius: 999px;
       border: 1px solid var(--line);
       background: rgba(255,255,255,0.05);
-      color: rgba(255,255,255,0.88);
-      white-space: nowrap;
+      color: rgba(255,255,255,0.9);
     }}
 
     .pill.ghost {{
@@ -704,18 +799,21 @@ async def home():
     }}
 
     .pill.low {{
-      border-color: rgba(110,168,254,0.25);
+      border-color: rgba(132,182,255,0.28);
     }}
+
     .pill.medium {{
-      border-color: rgba(255,193,7,0.35);
+      border-color: rgba(255,193,7,0.34);
     }}
+
     .pill.high {{
-      border-color: rgba(255,99,132,0.35);
+      border-color: rgba(255,99,132,0.40);
     }}
+
     .pill.critical {{
-      border-color: rgba(220,53,69,0.5);
+      border-color: rgba(220,53,69,0.52);
       background: rgba(220,53,69,0.12);
-  }}
+    }}
 
     .tag {{
       font-size: 12px;
@@ -723,34 +821,40 @@ async def home():
       border-radius: 999px;
       border: 1px solid var(--line);
       background: rgba(255,255,255,0.04);
-      color: rgba(255,255,255,0.72);
-      white-space: nowrap;
+      color: rgba(255,255,255,0.74);
     }}
 
     .source {{
-      margin-top: 2px;
+      min-width: 0;
       font-size: 13px;
       color: var(--muted);
-
-      overflow-wrap: anywhere;
+      line-height: 1.45;
       word-break: break-word;
+      overflow-wrap: anywhere;
+      padding-top: 2px;
+    }}
+
+    .source-label {{
+      color: rgba(255,255,255,0.72);
+      margin-right: 4px;
     }}
 
     a {{
-      color: var(--accent);
+      color: var(--blue);
       text-decoration: none;
-
-      overflow-wrap: anywhere;
       word-break: break-word;
+      overflow-wrap: anywhere;
     }}
+
     a:hover {{
       text-decoration: underline;
     }}
 
     .tip {{
-      margin-top: 14px;
+      margin-top: 16px;
       color: var(--muted);
       font-size: 12.5px;
+      line-height: 1.5;
     }}
 
     code {{
@@ -769,59 +873,56 @@ async def home():
     </div>
 
     <div class="toolbar">
-      <button id="reloadBtn">Reload</button>
-      <input id="q" placeholder="Search title / summary / tags..." />
+      <button id="reloadBtn" type="button">Reload</button>
+      <input id="q" type="text" placeholder="Search title / summary / tags..." />
     </div>
 
-    <section class="grid" id="grid">
+    <section id="grid" class="grid">
       {cards_html}
     </section>
 
-    <div class="tip">Tip: API endpoint → <a href="/api/latest">/api/latest</a> • Force refresh → <code>POST /api/refresh</code></div>
+    <div class="tip">
+      Tip: API endpoint → <a href="/api/latest" target="_blank" rel="noopener noreferrer">/api/latest</a>
+      • Force refresh → <code>POST /api/refresh</code>
+    </div>
   </div>
 
-<script>
-  const q = document.getElementById("q");
-  const grid = document.getElementById("grid");
-  const reloadBtn = document.getElementById("reloadBtn");
+  <script>
+    const grid = document.getElementById("grid");
+    const q = document.getElementById("q");
+    const reloadBtn = document.getElementById("reloadBtn");
 
-  function normalize(s) {{
-    return (s || "").toLowerCase().trim();
-  }}
-
-  function filterCards() {{
-    const term = normalize(q.value);
-    const cards = grid.querySelectorAll(".card");
-    if (!term) {{
-      cards.forEach(c => c.style.display = "");
-      return;
+    function normalize(s) {{
+      return (s || "").toLowerCase().trim();
     }}
-    cards.forEach(c => {{
-      const text = normalize(c.innerText);
-      c.style.display = text.includes(term) ? "" : "none";
+
+    function filterCards() {{
+      const term = normalize(q.value);
+      const cards = grid.querySelectorAll(".card");
+
+      if (!term) {{
+        cards.forEach(card => card.style.display = "");
+        return;
+      }}
+
+      cards.forEach(card => {{
+        const text = normalize(card.innerText);
+        card.style.display = text.includes(term) ? "" : "none";
+      }});
+    }}
+
+    q.addEventListener("input", filterCards);
+
+    reloadBtn.addEventListener("click", async () => {{
+      reloadBtn.disabled = true;
+      reloadBtn.innerText = "Loading...";
+      try {{
+        await fetch("/api/refresh", {{ method: "POST" }});
+      }} catch (e) {{}}
+      location.reload();
     }});
-  }}
-
-  q.addEventListener("input", filterCards);
-
-  reloadBtn.addEventListener("click", async () => {{
-    reloadBtn.disabled = true;
-    reloadBtn.innerText = "Loading...";
-    try {{
-      await fetch("/api/refresh", {{ method: "POST" }});
-      location.reload();
-    }} catch (e) {{
-      location.reload();
-    }}
-  }});
-</script>
-
+  </script>
 </body>
 </html>
 """
     return HTMLResponse(html)
-
-# Optional: handle accidental /latest visits nicely (your screenshot showed /latest "Not Found")
-@app.get("/latest")
-async def latest_redirect():
-    return JSONResponse({"detail": "Use /api/latest for JSON or / for UI."}, status_code=404)
