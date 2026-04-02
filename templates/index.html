@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>POLARIS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100">
+    <main class="mx-auto max-w-7xl px-4 py-8">
+      <div class="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p class="text-sm uppercase tracking-[0.2em] text-cyan-400">POLARIS</p>
+          <h1 class="mt-2 text-4xl font-semibold tracking-tight">Cyber and geopolitical risk intelligence</h1>
+          <p class="mt-3 max-w-3xl text-sm text-slate-300">
+            Unified monitoring for cyber threats, disinformation signals, geopolitical pressure, and prioritized risk events.
+          </p>
+        </div>
+        <form action="/api/v1/refresh" method="post">
+          <button class="rounded-2xl bg-cyan-500 px-5 py-3 font-medium text-slate-950 transition hover:bg-cyan-400">
+            Refresh all sources
+          </button>
+        </form>
+      </div>
+
+      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5"><p class="text-sm text-slate-400">Total items</p><h2 class="mt-2 text-3xl font-semibold">{{ summary.total_items }}</h2></article>
+        <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5"><p class="text-sm text-slate-400">High priority</p><h2 class="mt-2 text-3xl font-semibold text-amber-300">{{ summary.high_priority }}</h2></article>
+        <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5"><p class="text-sm text-slate-400">Critical items</p><h2 class="mt-2 text-3xl font-semibold text-rose-300">{{ summary.critical_items }}</h2></article>
+        <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5"><p class="text-sm text-slate-400">Cyber signals</p><h2 class="mt-2 text-3xl font-semibold">{{ summary.cyber_items }}</h2></article>
+        <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5"><p class="text-sm text-slate-400">Geopolitical signals</p><h2 class="mt-2 text-3xl font-semibold">{{ summary.geo_items }}</h2></article>
+        <article class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5"><p class="text-sm text-slate-400">Average risk</p><h2 class="mt-2 text-3xl font-semibold">{{ summary.avg_risk }}</h2></article>
+      </section>
+
+      <section class="mt-8 grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+        <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold">Configured sources</h2>
+            <span class="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">{{ sources|length }} sources</span>
+          </div>
+          <div class="mt-4 space-y-3">
+            {% for source in sources %}
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="font-medium">{{ source.name }}</p>
+                  <p class="mt-1 text-xs text-slate-400">{{ source.category }} · {{ source.url }}</p>
+                </div>
+                <span class="rounded-full px-3 py-1 text-xs {{ 'bg-emerald-500/15 text-emerald-300' if source.enabled else 'bg-slate-700 text-slate-300' }}">
+                  {{ 'enabled' if source.enabled else 'disabled' }}
+                </span>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+          <div class="flex items-center justify-between gap-4">
+            <h2 class="text-lg font-semibold">Latest intelligence</h2>
+            <span class="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">live priority feed</span>
+          </div>
+          <div class="mt-4 space-y-3">
+            {% for item in items %}
+            <article class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="rounded-full border border-slate-700 px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-slate-300">{{ item.category }}</span>
+                <span class="rounded-full px-2.5 py-1 text-[11px] {{ 'bg-rose-500/15 text-rose-300' if item.risk_score >= 80 else 'bg-amber-500/15 text-amber-300' if item.risk_score >= 65 else 'bg-sky-500/15 text-sky-300' if item.risk_score >= 45 else 'bg-emerald-500/15 text-emerald-300' }}">{{ item.severity }} · {{ item.risk_score }}</span>
+                <span class="text-xs text-slate-400">{{ item.source_name }}</span>
+              </div>
+              <h3 class="mt-3 text-lg font-semibold leading-7"><a href="{{ item.link }}" target="_blank" class="hover:text-cyan-300">{{ item.title }}</a></h3>
+              <p class="mt-2 text-sm leading-6 text-slate-300">{{ item.summary[:280] }}{% if item.summary|length > 280 %}...{% endif %}</p>
+              <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                <span>{{ item.published_at }}</span>
+                {% if item.tags %}<span>{{ item.tags }}</span>{% endif %}
+              </div>
+            </article>
+            {% endfor %}
+            {% if items|length == 0 %}
+            <div class="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-slate-400">
+              No intelligence items yet. Hit refresh to ingest feeds.
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
