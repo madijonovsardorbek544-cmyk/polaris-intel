@@ -7,6 +7,7 @@ import feedparser
 from sqlmodel import Session, func, select
 
 from app.models import FeedSource, IntelItem
+from app.schemas import SourceCreate, SourceUpdate
 
 
 DEFAULT_SOURCES = [
@@ -130,6 +131,64 @@ def ingest_source_by_id(session: Session, source_id: int) -> dict | None:
     if not source:
         return None
     return ingest_feed(session, source)
+
+
+def create_source(session: Session, payload: SourceCreate) -> FeedSource:
+    source = FeedSource(
+        name=payload.name,
+        url=str(payload.url),
+        category=payload.category,
+        enabled=payload.enabled,
+    )
+    session.add(source)
+    session.commit()
+    session.refresh(source)
+    return source
+
+
+def update_source(session: Session, source_id: int, payload: SourceUpdate) -> FeedSource | None:
+    source = session.get(FeedSource, source_id)
+    if not source:
+        return None
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(source, key, value)
+    session.add(source)
+    session.commit()
+    session.refresh(source)
+    return source
+
+
+def list_sources(session: Session, enabled_only: bool = False) -> list[FeedSource]:
+    query = select(FeedSource).order_by(FeedSource.name)
+    if enabled_only:
+        query = query.where(FeedSource.enabled == True)
+    return session.exec(query).all()
+
+
+def list_items(
+    session: Session,
+    *,
+    limit: int = 50,
+    q: str | None = None,
+    category: str | None = None,
+    severity: str | None = None,
+    source_name: str | None = None,
+    min_risk: int | None = None,
+) -> list[IntelItem]:
+    query = select(IntelItem)
+    if q:
+        query = query.where((IntelItem.title.contains(q)) | (IntelItem.summary.contains(q)) | (IntelItem.tags.contains(q)))
+    if category:
+        query = query.where(IntelItem.category == category)
+    if severity:
+        query = query.where(IntelItem.severity == severity)
+    if source_name:
+        query = query.where(IntelItem.source_name == source_name)
+    if min_risk is not None:
+        query = query.where(IntelItem.risk_score >= min_risk)
+    query = query.order_by(IntelItem.published_at.desc()).limit(limit)
+    return session.exec(query).all()
 
 
 def make_dashboard_summary(session: Session) -> dict:
