@@ -52,7 +52,7 @@
       <header class="hero">
         <div>
           <h1>{{ app_name }}</h1>
-          <p class="subtitle">Explainable cyber-geopolitical intelligence dashboard for paid pilot validation. Tracks RSS sources, watchlist matches, risk drivers, alert-ready items, and a daily brief.</p>
+          <p class="subtitle">Explainable cyber-geopolitical intelligence dashboard for first customer pilot SaaS validation. Tracks RSS sources, watchlist matches, risk drivers, alert-ready items, and a daily brief.</p>
         </div>
         <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div class="muted">v{{ version }}</div></div>
       </header>
@@ -100,6 +100,12 @@
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
       const opt = (value) => { const o = document.createElement("option"); o.value = value; o.textContent = value; return o; };
       const chip = (text, cls = "chip") => { const el = document.createElement("span"); el.className = cls; el.textContent = text; return el; };
+      function safeHttpUrl(value) {
+        try {
+          const url = new URL(value || "");
+          return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+        } catch (_) { return null; }
+      }
 
       function hydrateFilters() {
         const risks = uniq(state.items.map(i => i.risk_level));
@@ -126,8 +132,16 @@
         const cards = items.map(item => {
           const card = document.createElement("article"); card.className = "card";
           const title = document.createElement("h3");
-          const link = document.createElement("a"); link.href = item.source_url; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = item.title;
-          title.append(link); card.append(title);
+          const safeUrl = safeHttpUrl(item.source_url);
+          if (safeUrl) {
+            const link = document.createElement("a"); link.href = safeUrl; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = item.title;
+            title.append(link);
+          } else {
+            title.textContent = item.title || "Untitled item";
+            const unsafeSource = document.createElement("span"); unsafeSource.className = "muted"; unsafeSource.textContent = ` Source: ${item.source_domain || "unknown source"}`;
+            title.append(unsafeSource);
+          }
+          card.append(title);
           const meta = document.createElement("div"); meta.className = "meta";
           meta.append(chip(item.risk_level, `pill risk-${item.risk_level}`), chip(`Risk ${item.risk_score}`), chip(`Confidence ${item.confidence_score}`), chip(item.category), chip(item.source_domain || "source"));
           (item.watchlist_matches || []).slice(0, 3).forEach(m => meta.append(chip(`Watchlist: ${m.watchlist_name} · ${m.matched_value}`, "badge watch")));
@@ -166,15 +180,20 @@
         $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
         $("alerts").replaceChildren(...(state.alerts.length ? state.alerts.slice(0, 6).map(alert => {
           const el = document.createElement("div"); el.className = "mini";
-          el.innerHTML = `<strong>${alert.risk_level}: ${alert.matched_watchlist}</strong><div class="muted"></div>`;
-          el.querySelector(".muted").textContent = `${alert.title} — ${alert.reason}`;
+          const strong = document.createElement("strong");
+          strong.textContent = `${alert.risk_level}: ${alert.matched_watchlist_name || alert.matched_watchlist}`;
+          const muted = document.createElement("div"); muted.className = "muted";
+          muted.textContent = `${alert.title} — ${alert.reason}`;
+          el.append(strong, muted);
           return el;
         }) : [chip("No alert-ready watchlist matches")]);
         $("sources").replaceChildren(...state.sources.slice(0, 8).map(src => {
           const el = document.createElement("div"); el.className = "mini";
-          const status = src.last_error ? "err" : (src.last_success_at ? "ok" : "muted");
-          el.innerHTML = `<strong class="${status}">${src.last_error ? "Failing" : src.last_success_at ? "Healthy" : "Pending"}</strong><div class="muted"></div>`;
-          el.querySelector(".muted").textContent = `${src.source_url} · failures ${src.failure_count || 0}${src.last_error ? ` · ${src.last_error}` : ""}`;
+          const statusClass = src.status === "failing" ? "err" : (src.status === "healthy" ? "ok" : "muted");
+          const strong = document.createElement("strong"); strong.className = statusClass; strong.textContent = (src.status || "pending").toUpperCase();
+          const muted = document.createElement("div"); muted.className = "muted";
+          muted.textContent = `${src.source_url} · current failures ${src.consecutive_failure_count || 0} · total failures ${src.total_failure_count || 0} · empty ${src.empty_count || 0}${src.last_error ? ` · ${src.last_error}` : ""}`;
+          el.append(strong, muted);
           return el;
         }));
       }

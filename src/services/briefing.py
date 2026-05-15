@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import uuid
 from collections import Counter
 from dataclasses import asdict
+from typing import Any
 
-from ..models import IntelligenceItem, SourceHealth
+from ..models import Alert, IntelligenceItem, SourceHealth
 from .analysis import now_iso
 from .ingestion import item_to_dict
 
@@ -14,25 +16,76 @@ def generate_alerts(items: list[IntelligenceItem]) -> list[dict[str, object]]:
         if item.risk_level not in {"Critical", "High"} or not item.watchlist_matches:
             continue
         for match in item.watchlist_matches:
+            alert_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{item.id}|{match.watchlist_id}|{match.reason}").hex
+            created_at = item.ingested_at or now_iso()
             alerts.append(
                 {
+                    "id": alert_id,
                     "item_id": item.id,
                     "title": item.title,
                     "risk_level": item.risk_level,
+                    "matched_watchlist_id": match.watchlist_id,
+                    "matched_watchlist_name": match.watchlist_name,
                     "matched_watchlist": match.watchlist_name,
                     "reason": match.reason,
                     "recommended_action": item.recommended_action,
-                    "created_at": item.ingested_at or now_iso(),
+                    "status": "open",
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                    "notes": None,
+                    "org_id": match.org_id,
                 }
             )
     return alerts
+
+
+def alerts_from_items(items: list[IntelligenceItem]) -> list[Alert]:
+    return [
+        Alert(
+            id=str(raw["id"]),
+            item_id=str(raw["item_id"]),
+            title=str(raw["title"]),
+            risk_level=str(raw["risk_level"]),
+            matched_watchlist_id=str(raw["matched_watchlist_id"]),
+            matched_watchlist_name=str(raw["matched_watchlist_name"]),
+            reason=str(raw["reason"]),
+            recommended_action=str(raw["recommended_action"]),
+            status=str(raw.get("status") or "open"),
+            created_at=str(raw["created_at"]),
+            updated_at=str(raw["updated_at"]),
+            notes=raw.get("notes") if raw.get("notes") is None else str(raw.get("notes")),
+            org_id=str(raw.get("org_id") or "demo"),
+        )
+        for raw in generate_alerts(items)
+    ]
+
+
+def alert_to_dict(alert: Alert) -> dict[str, Any]:
+    payload = asdict(alert)
+    payload["matched_watchlist"] = alert.matched_watchlist_name
+    return payload
+
+
+def format_alert_for_telegram(alert: Alert | dict[str, Any]) -> str:
+    data = alert_to_dict(alert) if isinstance(alert, Alert) else alert
+    return "\n".join(
+        [
+            f"POLARIS Alert [{data.get('risk_level', 'Unknown')}]",
+            str(data.get("title") or "Untitled intelligence item"),
+            f"Watchlist: {data.get('matched_watchlist_name') or data.get('matched_watchlist') or 'Unknown'}",
+            f"Reason: {data.get('reason') or 'No reason provided'}",
+            f"Action: {data.get('recommended_action') or 'Review and triage.'}",
+            f"Source/Item: {data.get('item_id') or 'unknown'}",
+        ]
+    )
 
 
 def generate_daily_brief(items: list[IntelligenceItem], sources: list[SourceHealth]) -> dict[str, object]:
     top_risks = sorted(items, key=lambda item: (item.risk_score, item.ingested_at), reverse=True)[:5]
     countries = Counter(country for item in items for country in item.affected_countries)
     sectors = Counter(sector for item in items for sector in item.affected_sectors)
-    failures = [asdict(source) for source in sources if source.last_error]
+    failures = [asdict(source) for source in sources if source.status == "failing"]
+    empty_sources = [asdict(source) for source in sources if source.status == "empty"]
     critical_or_high = [item for item in items if item.risk_level in {"Critical", "High"}]
     actions = list(dict.fromkeys(item.recommended_action for item in critical_or_high[:5]))
     headline = (
@@ -47,4 +100,5 @@ def generate_daily_brief(items: list[IntelligenceItem], sources: list[SourceHeal
         "sectors_affected": sectors.most_common(10),
         "recommended_actions": actions or ["Seed or ingest intelligence, then review items matching your watchlists."],
         "source_failures": failures,
+        "empty_sources": empty_sources,
     }

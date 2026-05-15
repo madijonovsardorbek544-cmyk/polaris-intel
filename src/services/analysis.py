@@ -47,6 +47,7 @@ def explain_watchlist_matches(
                 matched_on=matched_on,
                 matched_value=value,
                 reason=reason,
+                org_id=watchlist.org_id,
             )
         )
 

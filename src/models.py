@@ -10,6 +10,7 @@ class WatchlistMatch:
     matched_on: str
     matched_value: str
     reason: str
+    org_id: str = "demo"
 
 
 @dataclass
@@ -40,6 +41,7 @@ class IntelligenceItem:
 class Watchlist:
     id: str
     name: str
+    org_id: str = "demo"
     countries: list[str] = field(default_factory=list)
     sectors: list[str] = field(default_factory=list)
     organizations: list[str] = field(default_factory=list)
@@ -54,5 +56,26 @@ class SourceHealth:
     source_url: str
     last_success_at: str | None = None
     last_failure_at: str | None = None
-    failure_count: int = 0
+    last_empty_at: str | None = None
+    total_failure_count: int = 0
+    consecutive_failure_count: int = 0
+    empty_count: int = 0
     last_error: str | None = None
+    status: str = "pending"
+
+
+@dataclass
+class Alert:
+    id: str
+    item_id: str
+    title: str
+    risk_level: str
+    matched_watchlist_id: str
+    matched_watchlist_name: str
+    reason: str
+    recommended_action: str
+    status: str = "open"
+    created_at: str = ""
+    updated_at: str = ""
+    notes: str | None = None
+    org_id: str = "demo"

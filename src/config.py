@@ -52,6 +52,7 @@ class Settings:
     app_version: str = "1.0.0"
     port: int = int(os.getenv("PORT", "8000"))
     database_url: str = os.getenv("DATABASE_URL", "").strip()
+    api_key: str = os.getenv("POLARIS_API_KEY", "").strip()
     max_items: int = int(os.getenv("MAX_ITEMS", "60"))
     auto_refresh_seconds: int = int(os.getenv("AUTO_REFRESH_SECONDS", "900"))
     http_timeout: float = float(os.getenv("HTTP_TIMEOUT", "15"))
