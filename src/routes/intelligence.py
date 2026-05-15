@@ -8,12 +8,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..auth import require_api_key
 from ..config import settings
 from ..database import get_alert, get_item, list_alerts, list_items, list_source_health, save_alerts, update_alert
+from ..models import Alert, IntelligenceItem
 from ..schemas import AlertUpdate
 from ..services.analysis import now_iso
-from ..services.briefing import alert_to_dict, alerts_from_items, generate_alerts, generate_daily_brief
+from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_store, seed_demo_items
 
 router = APIRouter(prefix="/api")
+
+
+def _item_matches_org(item: IntelligenceItem, org_id: str | None) -> bool:
+    if not org_id:
+        return True
+    return any(match.org_id == org_id for match in item.watchlist_matches)
+
+
+def _alert_matches_org(alert: Alert | dict[str, object], org_id: str | None) -> bool:
+    if not org_id:
+        return True
+    if isinstance(alert, Alert):
+        return alert.org_id == org_id
+    return alert.get("org_id") == org_id
 
 
 @router.get("/latest")
@@ -28,9 +43,12 @@ async def items(
     risk_level: str | None = None,
     country: str | None = None,
     sector: str | None = None,
+    org_id: str | None = None,
     limit: int = Query(default=60, ge=1, le=200),
 ) -> list[dict[str, object]]:
     results = await list_items(limit)
+    if org_id:
+        results = [item for item in results if _item_matches_org(item, org_id)]
     if q:
         needle = q.lower()
         results = [item for item in results if needle in f"{item.title} {item.summary} {' '.join(item.tags)}".lower()]
@@ -70,11 +88,23 @@ async def sources() -> list[dict[str, object]]:
 
 
 @router.get("/alerts")
-async def alerts() -> list[dict[str, object]]:
-    persisted = await list_alerts()
+async def alerts(org_id: str | None = None) -> dict[str, object]:
+    persisted = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
+    generated_preview = [alert for alert in generate_alerts(await list_items(settings.max_items)) if _alert_matches_org(alert, org_id)]
+    return {
+        "persisted": [alert_to_dict(alert) for alert in persisted],
+        "generated_preview": generated_preview,
+        "total_persisted": len(persisted),
+        "total_generated_preview": len(generated_preview),
+    }
+
+
+@router.get("/alerts/flat")
+async def alerts_flat(org_id: str | None = None) -> list[dict[str, object]]:
+    persisted = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     if persisted:
         return [alert_to_dict(alert) for alert in persisted]
-    return generate_alerts(await list_items(settings.max_items))
+    return [alert for alert in generate_alerts(await list_items(settings.max_items)) if _alert_matches_org(alert, org_id)]
 
 
 @router.get("/alerts/{alert_id}")
@@ -92,8 +122,12 @@ async def alert_detail(alert_id: str) -> dict[str, object]:
 @router.post("/alerts/generate", dependencies=[Depends(require_api_key)])
 async def generate_persistent_alerts() -> dict[str, object]:
     before = await list_alerts()
-    saved = await save_alerts(alerts_from_items(await list_items(settings.max_items)))
-    return {"ok": True, "generated": max(0, len(saved) - len(before)), "alerts": [alert_to_dict(alert) for alert in saved]}
+    before_keys = {(alert.item_id, alert.matched_watchlist_id, alert.reason) for alert in before}
+    candidates = alerts_from_items(await list_items(settings.max_items))
+    created = sum(1 for alert in candidates if (alert.item_id, alert.matched_watchlist_id, alert.reason) not in before_keys)
+    existing = len(candidates) - created
+    saved = await save_alerts(candidates) if candidates else await list_alerts()
+    return {"ok": True, "created": created, "existing": existing, "alerts": [alert_to_dict(alert) for alert in saved]}
 
 
 @router.patch("/alerts/{alert_id}", dependencies=[Depends(require_api_key)])
@@ -104,9 +138,20 @@ async def patch_alert(alert_id: str, payload: AlertUpdate) -> dict[str, object]:
     return alert_to_dict(alert)
 
 
+@router.post("/alerts/{alert_id}/telegram-preview", dependencies=[Depends(require_api_key)])
+async def telegram_preview(alert_id: str) -> dict[str, object]:
+    alert = await get_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"message": format_alert_for_telegram(alert)}
+
+
 @router.get("/brief/daily")
-async def daily_brief() -> dict[str, object]:
-    return generate_daily_brief(await list_items(settings.max_items), await list_source_health())
+async def daily_brief(org_id: str | None = None) -> dict[str, object]:
+    all_items = await list_items(settings.max_items)
+    if org_id:
+        all_items = [item for item in all_items if _item_matches_org(item, org_id)]
+    return generate_daily_brief(all_items, await list_source_health())
 
 
 @router.get("/stats")

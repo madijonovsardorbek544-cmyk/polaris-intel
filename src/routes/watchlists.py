@@ -39,8 +39,11 @@ async def create_watchlist(payload: WatchlistCreate) -> Watchlist:
 
 
 @router.get("", response_model=list[WatchlistOut])
-async def get_watchlists() -> list[Watchlist]:
-    return await list_watchlists()
+async def get_watchlists(org_id: str | None = None) -> list[Watchlist]:
+    watchlists = await list_watchlists()
+    if org_id:
+        watchlists = [watchlist for watchlist in watchlists if watchlist.org_id == org_id]
+    return watchlists
 
 
 @router.get("/{watchlist_id}", response_model=WatchlistOut)
