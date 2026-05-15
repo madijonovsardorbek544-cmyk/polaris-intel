@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from ..config import settings
 from ..database import database_enabled, list_alerts, list_items, list_source_health
 from ..services.ingestion import refresh_status
 
 router = APIRouter()
+
+
+@router.head("/health", include_in_schema=False)
+async def health_head() -> Response:
+    return Response(status_code=200)
 
 
 @router.get("/health")

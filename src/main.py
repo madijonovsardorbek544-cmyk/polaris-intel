@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .config import settings
@@ -40,6 +40,11 @@ async def startup_event() -> None:
     if not _bg_task_started:
         _bg_task_started = True
         asyncio.create_task(background_refresh_loop())
+
+
+@app.head("/", include_in_schema=False)
+async def home_head() -> Response:
+    return Response(status_code=200)
 
 
 @app.get("/", response_class=HTMLResponse)

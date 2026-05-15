@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import logging
@@ -11,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from ..auth import require_api_key, require_read_api_key
 from ..config import settings
-from ..database import add_alert_event, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, list_alert_events, list_alerts, list_items, list_source_configs, list_source_health, put_org_profile, reset_memory_state, save_alerts_with_counts, update_alert, update_source_config
+from ..database import add_alert_event, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, list_alert_events, list_alerts, list_items, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, update_alert, update_source_config
 from ..models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, SourceConfig
 from ..schemas import AlertUpdate, OrgScoringProfileIn, SourceConfigCreate, SourceConfigUpdate
 from ..services.analysis import now_iso
@@ -35,6 +36,61 @@ def _alert_matches_org(alert: Alert | dict[str, object], org_id: str | None) -> 
     if isinstance(alert, Alert):
         return alert.org_id == org_id
     return alert.get("org_id") == org_id
+
+
+async def _dashboard_check(name: str, operation) -> tuple[str, dict[str, object], str | None]:
+    try:
+        result = await operation()
+        check: dict[str, object] = {"ok": True}
+        if isinstance(result, int):
+            check["count"] = result
+        return name, check, None
+    except Exception as exc:
+        logger.warning("Dashboard health check failed check=%s error_type=%s message=%s", name, type(exc).__name__, str(exc))
+        return name, {"ok": False, "error": type(exc).__name__}, f"{name} failed: {type(exc).__name__}"
+
+
+@router.get("/dashboard-health", dependencies=[Depends(require_read_api_key)])
+async def dashboard_health(org_id: str = Query(default=settings.default_org)) -> dict[str, object]:
+    async def items_count() -> int:
+        return len([item for item in await list_items(settings.max_items) if _item_matches_org(item, org_id)])
+
+    async def alerts_count() -> int:
+        return len([alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)])
+
+    async def sources_count() -> int:
+        return len(await list_source_health())
+
+    async def brief_ok() -> None:
+        all_items = await list_items(settings.max_items)
+        generate_daily_brief([item for item in all_items if _item_matches_org(item, org_id)], await list_source_health())
+
+    async def watchlists_count() -> int:
+        return len([watchlist for watchlist in await list_watchlists() if watchlist.org_id == org_id])
+
+    async def onboarding_ok() -> None:
+        if not ONBOARDING_TEMPLATES:
+            raise RuntimeError("No onboarding templates configured")
+
+    async def value_report_ok() -> None:
+        await build_value_report(org_id, 7)
+
+    async def source_configs_count() -> int:
+        return len(await list_source_configs())
+
+    checks = await asyncio.gather(
+        _dashboard_check("items", items_count),
+        _dashboard_check("alerts", alerts_count),
+        _dashboard_check("sources", sources_count),
+        _dashboard_check("brief", brief_ok),
+        _dashboard_check("watchlists", watchlists_count),
+        _dashboard_check("onboarding", onboarding_ok),
+        _dashboard_check("value_report", value_report_ok),
+        _dashboard_check("source_configs", source_configs_count),
+    )
+    check_map = {name: check for name, check, _ in checks}
+    errors = [error for _, _, error in checks if error]
+    return {"ok": not errors, "checks": check_map, "errors": errors}
 
 
 @router.get("/latest", dependencies=[Depends(require_read_api_key)])
