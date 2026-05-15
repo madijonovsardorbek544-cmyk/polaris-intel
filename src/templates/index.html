@@ -51,6 +51,9 @@
       .err { color:var(--critical); } .ok { color:var(--ok); }
       .notice { min-height:18px; margin-top:8px; font-size:13px; }
       .deployment-banners { display:grid; gap:10px; margin:0 0 16px; }
+      .demo-panel { margin:0 0 16px; padding:18px; }
+      .demo-metrics, .diagnostic-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+      .status-details { margin-top:8px; display:grid; gap:4px; }
       .banner { border:1px solid var(--line); border-radius:14px; padding:11px 14px; font-size:14px; background:rgba(138,180,255,.12); color:var(--text); }
       .banner.warning { border-color:rgba(255,159,104,.45); background:rgba(255,159,104,.14); }
       @media (max-width: 1050px) { .layout, .hero { grid-template-columns:1fr; } .sidebar { position:static; } .toolbar { grid-template-columns:1fr 1fr; } .stats { grid-template-columns:1fr 1fr; } }
@@ -64,7 +67,7 @@
           <h1>{{ app_name }}</h1>
           <p class="subtitle">Real pilot customer workflow product for explainable cyber-geopolitical intelligence. Tracks RSS sources, watchlist matches, risk drivers, persistent alert workflow, and a daily brief.</p>
         </div>
-        <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div></div>
+        <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div id="statusDetails" class="status-details muted"></div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div></div>
       </header>
 
       {% if demo_mode or not api_key_configured %}
@@ -77,6 +80,18 @@
         {% endif %}
       </section>
       {% endif %}
+
+      <section class="panel demo-panel" aria-label="Public Demo">
+        <h2>Public Demo</h2>
+        <p class="summary">POLARIS monitors cyber and geopolitical risk signals and explains what matters to an organization.</p>
+        <div class="demo-metrics">
+          <span class="chip"><strong id="demoItems">{{ items_count }}</strong>&nbsp;items monitored</span>
+          <span class="chip"><strong id="demoSources">—</strong>&nbsp;sources</span>
+          <span class="chip"><strong id="demoHighCount">—</strong>&nbsp;high/critical</span>
+          <span class="chip">Last refresh: <strong id="demoLastStatus">{{ status }}</strong></span>
+        </div>
+        <p class="muted section">Read-only public demo. Operator actions require an API key.</p>
+      </section>
 
       <section class="stats">
         <div class="stat"><strong id="totalItems">—</strong><span>Items</span></div>
@@ -102,6 +117,10 @@
             <label class="muted" for="activeOrg">Active org_id</label>
             <input id="activeOrg" value="{{ default_org }}" placeholder="Active org_id" />
             <p class="muted">Stored in sessionStorage. Dashboard reads use this org_id.</p>
+          </section>
+          <section class="panel">
+            <h2>Diagnostics</h2>
+            <div id="diagnostics" class="diagnostic-links"></div>
           </section>
           <section class="panel">
             <h2>Admin API key</h2>
@@ -171,7 +190,8 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
-      const state = { items: [], stats: {}, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, activeOrg: "{{ default_org }}" };
+      const initialItemsCount = {{ items_count }};
+      const state = { items: [], stats: {}, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, activeOrg: "{{ default_org }}", panelErrors: {}, criticalStatus: {} };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
       const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
@@ -211,7 +231,22 @@
         $("alertCount").textContent = state.alerts.total_persisted ?? (state.alerts.persisted || []).length;
       }
 
+      function emptyCard(message) {
+        const card = document.createElement("article"); card.className = "card";
+        const text = document.createElement("p"); text.className = "summary"; text.textContent = message;
+        card.append(text); return card;
+      }
+
       function renderCards(items) {
+        if (!items.length) {
+          const hasGlobalItems = initialItemsCount > 0;
+          const hasFilters = ["q", "risk", "category", "country", "sector"].some(id => $(id).value);
+          const message = state.items.length === 0 && hasGlobalItems
+            ? "No org-specific items yet. Global items exist, but none match this org’s watchlists."
+            : (hasFilters ? "No items match the current filters." : "No intelligence items available yet.");
+          $("cards").replaceChildren(emptyCard(message));
+          return;
+        }
         const cards = items.map(item => {
           const card = document.createElement("article"); card.className = "card";
           const title = document.createElement("h3"); const safeUrl = safeHttpUrl(item.source_url);
@@ -257,7 +292,7 @@
           const del = document.createElement("button"); del.className = "danger section"; del.textContent = "Delete"; del.addEventListener("click", () => deleteWatchlist(wl.id));
           const actions = document.createElement("div"); actions.className = "form-grid"; actions.append(edit, del);
           el.append(strong, muted, actions); return el;
-        }) : [chip("No watchlists yet — Action: Add watchlist")]));
+        }) : [chip("No watchlists yet. Add a watchlist to make alerts organization-specific.")]));
       }
 
       function alertText(alert) { return `${alert.title || ""} ${alert.reason || ""} ${alert.matched_watchlist_name || alert.matched_watchlist || ""}`.toLowerCase(); }
@@ -305,7 +340,7 @@
           nodes.push(chip(`${previews.length} generated alert previews. Click Generate persistent alerts to persist them.`));
           previews.slice(0, 8).forEach(alert => nodes.push(previewCard(alert)));
         }
-        if (!nodes.length) nodes.push(chip("No alerts exist — Action: Generate alerts"));
+        if (!nodes.length) nodes.push(chip("No alerts yet. Add a watchlist, then generate persistent alerts."));
         $("alerts").replaceChildren(...nodes);
       }
 
@@ -313,7 +348,8 @@
         $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
         $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
         renderWatchlists(); renderAlerts(); renderValueReport(); renderSourceConfigs();
-        if (!state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
+        if (state.panelErrors.onboarding) setNotice("watchlistNotice", state.panelErrors.onboarding);
+        if (!state.panelErrors.sourceConfigs && !state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
         $("sources").replaceChildren(...(state.sources.length ? state.sources.slice(0, 8).map(src => {
           const el = document.createElement("div"); el.className = "mini";
           const statusClass = src.status === "failing" ? "err" : (src.status === "healthy" ? "ok" : "muted");
@@ -324,6 +360,10 @@
       }
 
       function renderValueReport() {
+        if (state.panelErrors.valueReport) {
+          $("valueReport").replaceChildren(chip(state.panelErrors.valueReport, "chip err"));
+          return;
+        }
         const r = state.valueReport || {};
         $("valueReport").replaceChildren(
           chip(`${r.total_items_monitored || 0} items monitored`), chip(`${r.total_alerts || 0} alerts`), chip(`${r.unresolved_alerts || 0} unresolved`),
@@ -332,6 +372,10 @@
       }
 
       function renderSourceConfigs() {
+        if (state.panelErrors.sourceConfigs) {
+          $("sourceConfigs").replaceChildren(chip(state.panelErrors.sourceConfigs, "chip err"));
+          return;
+        }
         $("sourceConfigs").replaceChildren(...(state.sourceConfigs.length ? state.sourceConfigs.map(src => {
           const el = document.createElement("div"); el.className = "mini";
           const strong = document.createElement("strong"); strong.textContent = `${src.enabled ? "Enabled" : "Disabled"}: ${src.label}`;
@@ -343,6 +387,69 @@
         }) : [chip("No custom sources yet — Action: Add source")]));
       }
 
+      function renderPublicDemo() {
+        const byRisk = state.items.reduce((acc, item) => { acc[item.risk_level] = (acc[item.risk_level] || 0) + 1; return acc; }, {});
+        $("demoItems").textContent = state.items.length || initialItemsCount;
+        $("demoSources").textContent = state.sources.length;
+        $("demoHighCount").textContent = (byRisk.Critical || 0) + (byRisk.High || 0);
+        $("demoLastStatus").textContent = state.panelErrors.items ? "partial" : "OK";
+      }
+
+      function renderDiagnostics() {
+        const links = [
+          ["Health", "/health"],
+          ["Dashboard health", "/api/dashboard-health"],
+          ["Items", `/api/items?${orgQuery()}`],
+          ["Alerts", `/api/alerts?${orgQuery()}`],
+          ["Sources", "/api/sources"],
+        ];
+        $("diagnostics").replaceChildren(...links.map(([label, href]) => {
+          const a = document.createElement("a"); a.href = href; a.target = "_blank"; a.rel = "noreferrer"; a.className = "chip"; a.textContent = label; return a;
+        }));
+      }
+
+      function panelErrorMessage(label, status) {
+        const pretty = { valueReport: "Value report", sourceConfigs: "Source config", onboarding: "Onboarding templates", alertEvents: "Alert events" }[label] || label.charAt(0).toUpperCase() + label.slice(1);
+        return `${pretty} failed${status ? ` (HTTP ${status})` : ""}`;
+      }
+
+      async function safeJsonFetch(url, options, fallback, label) {
+        try {
+          const response = await fetch(url, options);
+          if (response.status === 401) {
+            state.panelErrors[label] = panelErrorMessage(label, 401) + ": read blocked; add API key.";
+            return fallback;
+          }
+          if (!response.ok) {
+            state.panelErrors[label] = panelErrorMessage(label, response.status);
+            return fallback;
+          }
+          return await response.json();
+        } catch (err) {
+          state.panelErrors[label] = `${label} failed: ${err.message || "network error"}`;
+          return fallback;
+        }
+      }
+
+      function renderStatus() {
+        const criticalLabels = ["items", "alerts", "sources", "brief"];
+        const failedCritical = criticalLabels.filter(label => state.panelErrors[label]);
+        const errors = Object.values(state.panelErrors);
+        if (failedCritical.length === criticalLabels.length) {
+          $("status").textContent = "Status: ERROR · critical dashboard APIs failed";
+          $("status").classList.add("err");
+        } else if (errors.length) {
+          $("status").textContent = `Dashboard partially loaded · ${state.activeOrg} · ${state.items.length} items`;
+          $("status").classList.remove("err");
+        } else {
+          $("status").textContent = `Status: OK · ${state.activeOrg} · ${state.items.length} items`;
+          $("status").classList.remove("err");
+        }
+        $("statusDetails").replaceChildren(...errors.map(message => {
+          const div = document.createElement("div"); div.textContent = message; return div;
+        }));
+      }
+
       function applyFilters() {
         const q = $("q").value.toLowerCase(); const risk = $("risk").value; const category = $("category").value; const country = $("country").value; const sector = $("sector").value;
         renderCards(state.items.filter(item => {
@@ -352,18 +459,28 @@
       }
 
       async function load() {
-        try {
-          state.activeOrg = activeOrg(); $("activeOrgLabel").textContent = state.activeOrg; $("wlOrg").value = $("wlOrg").value.trim() || state.activeOrg;
-          const headers = adminHeaders();
-          const [itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes, templatesRes, valueRes, sourceConfigsRes] = await Promise.all([
-            fetch(`/api/items?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/alerts?${orgQuery()}`, { cache: "no-store", headers }), fetch("/api/sources", { cache: "no-store", headers }), fetch(`/api/brief/daily?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/watchlists?${orgQuery()}`, { cache: "no-store", headers }), fetch("/api/onboarding/template", { cache: "no-store", headers }), fetch(`/api/reports/value?${orgQuery()}&days=7`, { cache: "no-store", headers }), fetch("/api/source-configs", { cache: "no-store", headers })
-          ]);
-          if ([itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes, templatesRes, valueRes, sourceConfigsRes].some(r => r.status === 401)) throw new Error("Read blocked: invalid or missing API key. Action: Add API key.");
-          if (![itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes, templatesRes, valueRes, sourceConfigsRes].every(r => r.ok)) throw new Error("API request failed");
-          state.items = await itemsRes.json(); state.alerts = await alertsRes.json(); state.sources = await sourcesRes.json(); state.brief = await briefRes.json(); state.watchlists = await watchlistsRes.json(); state.templates = (await templatesRes.json()).templates || {}; state.valueReport = await valueRes.json(); state.sourceConfigs = await sourceConfigsRes.json();
-          await Promise.all((state.alerts.persisted || []).map(async alert => { const r = await fetch(`/api/alerts/${alert.id}/events`, { cache: "no-store", headers }); alert.events = r.ok ? await r.json() : []; }));
-          hydrateFilters(); renderStats(); renderSidebars(); applyFilters(); $("status").textContent = `Status: OK · ${state.activeOrg} · ${state.items.length} items`; $("status").classList.remove("err");
-        } catch (err) { $("status").textContent = `Status: ERROR · ${err.message}`; $("status").classList.add("err"); renderCards([]); }
+        state.activeOrg = activeOrg();
+        state.panelErrors = {};
+        $("activeOrgLabel").textContent = state.activeOrg;
+        $("wlOrg").value = $("wlOrg").value.trim() || state.activeOrg;
+        renderDiagnostics();
+        const headers = adminHeaders();
+        const requestOptions = { cache: "no-store", headers };
+        await Promise.allSettled([
+          safeJsonFetch(`/api/items?${orgQuery()}`, requestOptions, [], "items").then(data => { state.items = Array.isArray(data) ? data : []; }),
+          safeJsonFetch(`/api/alerts?${orgQuery()}`, requestOptions, { persisted: [], generated_preview: [], total_persisted: 0, total_generated_preview: 0 }, "alerts").then(data => { state.alerts = data || { persisted: [], generated_preview: [] }; }),
+          safeJsonFetch("/api/sources", requestOptions, [], "sources").then(data => { state.sources = Array.isArray(data) ? data : []; }),
+          safeJsonFetch(`/api/brief/daily?${orgQuery()}`, requestOptions, {}, "brief").then(data => { state.brief = data || {}; }),
+          safeJsonFetch(`/api/watchlists?${orgQuery()}`, requestOptions, [], "watchlists").then(data => { state.watchlists = Array.isArray(data) ? data : []; }),
+          safeJsonFetch("/api/onboarding/template", requestOptions, { templates: {} }, "onboarding").then(data => { state.templates = (data && data.templates) || {}; }),
+          safeJsonFetch(`/api/reports/value?${orgQuery()}&days=7`, requestOptions, {}, "valueReport").then(data => { state.valueReport = data || {}; }),
+          safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; })
+        ]);
+        await Promise.allSettled((state.alerts.persisted || []).map(async alert => {
+          const events = await safeJsonFetch(`/api/alerts/${alert.id}/events`, requestOptions, [], "alertEvents");
+          alert.events = Array.isArray(events) ? events : [];
+        }));
+        hydrateFilters(); renderStats(); renderPublicDemo(); renderSidebars(); applyFilters(); renderStatus();
       }
 
       async function refreshNow() {

@@ -38,7 +38,6 @@ DEFAULT_FEEDS = [
     "https://www.darkreading.com/rss.xml",
     "https://www.aljazeera.com/xml/rss/all.xml",
     "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://www.reutersagency.com/feed/?best-topics=world&post_type=best",
 ]
 
 

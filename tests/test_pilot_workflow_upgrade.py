@@ -110,7 +110,7 @@ def test_dashboard_contains_new_workflow_controls(monkeypatch) -> None:
 
     monkeypatch.setattr("src.main.refresh_store", fake_refresh_store)
     html = client().get("/").text
-    for expected in ["Create from template", "Value report", "Source config", "Send Telegram", "No items exist", "Action: Add API key"]:
+    for expected in ["Create from template", "Value report", "Source config", "Send Telegram", "Public Demo", "Diagnostics"]:
         assert expected in html
 
 
