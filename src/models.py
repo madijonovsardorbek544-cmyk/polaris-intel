@@ -79,3 +79,35 @@ class Alert:
     updated_at: str = ""
     notes: str | None = None
     org_id: str = "demo"
+    owner: str | None = None
+    due_at: str | None = None
+    severity_override: str | None = None
+    resolution_summary: str | None = None
+
+
+@dataclass
+class AlertEvent:
+    id: str
+    alert_id: str
+    event_type: str
+    message: str
+    created_at: str = ""
+
+
+@dataclass
+class SourceConfig:
+    id: str
+    url: str
+    label: str
+    category: str = "custom"
+    enabled: bool = True
+    created_at: str = ""
+
+
+@dataclass
+class OrgScoringProfile:
+    org_id: str
+    high_priority_countries: list[str] = field(default_factory=list)
+    high_priority_sectors: list[str] = field(default_factory=list)
+    risk_boost_keywords: list[str] = field(default_factory=list)
+    risk_reduce_keywords: list[str] = field(default_factory=list)

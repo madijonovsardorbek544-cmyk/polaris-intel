@@ -257,3 +257,81 @@ uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
 For platforms with a `Procfile`, ensure it points to `uvicorn src.main:app` and provides `PORT`.
+
+## Pilot customer workflow upgrade
+
+POLARIS Intel is now positioned as a real pilot customer workflow product: it supports explainable monitoring, watchlist-driven alerting, analyst ownership, event history, guided onboarding, source configuration, value reporting, and exportable evidence. It is **not** enterprise-complete yet.
+
+### API key protection
+
+Set `POLARIS_API_KEY` to require `X-Polaris-API-Key` for write operations such as refresh, watchlist changes, alert generation, alert updates, source configuration, org scoring profiles, demo reset, and Telegram sending.
+
+Optional read protection is enabled with:
+
+```bash
+POLARIS_API_KEY=change-me
+POLARIS_PROTECT_READS=true
+```
+
+When enabled, sensitive read endpoints require the same `X-Polaris-API-Key`. `/health` remains public for uptime checks.
+
+### Alert ownership workflow
+
+Persistent alerts now include owner, due date, severity override, resolution summary, notes, and statuses: `open`, `acknowledged`, `in_progress`, `resolved`, and `false_positive`. Alert updates create audit events for status, owner, notes, resolution, and severity changes.
+
+Useful endpoints:
+
+- `PATCH /api/alerts/{id}`
+- `GET /api/alerts/{id}/events`
+
+### Onboarding templates
+
+`GET /api/onboarding/template` returns starter watchlist templates for school, NGO, logistics, bank, energy, telecom, and government organizations. The dashboard can fill watchlist fields from a selected template before the operator saves it.
+
+### Value reports
+
+`GET /api/reports/value?org_id=<org_id>&days=7` returns a customer-facing value report with monitored items, alert counts, unresolved/resolved work, average risk, top countries, top sectors, top watchlists, source failures, and recommended next actions.
+
+### CSV export
+
+- `GET /api/export/alerts.csv?org_id=<org_id>`
+- `GET /api/export/value-report.csv?org_id=<org_id>&days=7`
+
+Exports are protected by optional read protection when `POLARIS_PROTECT_READS=true`.
+
+### Telegram sending
+
+Telegram previews remain available. Real sending is enabled safely with:
+
+```bash
+TELEGRAM_BOT_TOKEN=<bot-token>
+TELEGRAM_CHAT_ID=<chat-id>
+```
+
+Use `POST /api/alerts/{id}/telegram-send` with the write API key. If either variable is missing, POLARIS returns a clear `400` and records a `telegram_failed` event. Tokens and chat IDs are never shown in the dashboard.
+
+### Source configuration
+
+Operators can configure RSS sources without editing environment variables:
+
+- `GET /api/source-configs`
+- `POST /api/source-configs`
+- `PATCH /api/source-configs/{id}`
+- `DELETE /api/source-configs/{id}`
+
+Refresh uses enabled source configs if any exist; otherwise it falls back to `FEEDS` / default feeds.
+
+### Org scoring profiles
+
+Use `GET /api/org-profile?org_id=<org_id>` and `PUT /api/org-profile?org_id=<org_id>` to calibrate rule-based scoring per organization with high-priority countries, sectors, boost keywords, and reduce keywords. Adjustments are explainable through `risk_factors`.
+
+### What remains before enterprise / paid-scale deployment
+
+- Real user login
+- Full multi-tenant authorization and tenant isolation enforcement
+- Billing
+- Alembic migrations
+- Hosted monitoring and alerting for the POLARIS service itself
+- Analyst queues and assignment SLAs
+- Customer admin portal
+- Legal/compliance review

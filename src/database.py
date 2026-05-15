@@ -7,12 +7,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
-from .models import Alert, IntelligenceItem, SourceHealth, Watchlist, WatchlistMatch
+from .models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
 
 _ITEMS: list[IntelligenceItem] = []
 _WATCHLISTS: list[Watchlist] = []
 _SOURCE_HEALTH: dict[str, SourceHealth] = {}
 _ALERTS: list[Alert] = []
+_ALERT_EVENTS: list[AlertEvent] = []
+_SOURCE_CONFIGS: list[SourceConfig] = []
+_ORG_PROFILES: dict[str, OrgScoringProfile] = {}
 _LOCK = asyncio.Lock()
 
 
@@ -221,10 +224,33 @@ async def init_db() -> None:
                         updated_at TIMESTAMPTZ NOT NULL,
                         notes TEXT,
                         org_id TEXT NOT NULL DEFAULT 'demo',
+                        owner TEXT,
+                        due_at TEXT,
+                        severity_override TEXT,
+                        resolution_summary TEXT,
                         UNIQUE (item_id, matched_watchlist_id, reason)
                     );
                     """
                 )
+                cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS owner TEXT;")
+                cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS due_at TEXT;")
+                cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS severity_override TEXT;")
+                cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolution_summary TEXT;")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS alert_events (
+                        id TEXT PRIMARY KEY, alert_id TEXT NOT NULL, event_type TEXT NOT NULL, message TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS source_configs (
+                        id TEXT PRIMARY KEY, url TEXT NOT NULL, label TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'custom', enabled BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS org_scoring_profiles (
+                        org_id TEXT PRIMARY KEY, high_priority_countries JSONB NOT NULL DEFAULT '[]'::jsonb, high_priority_sectors JSONB NOT NULL DEFAULT '[]'::jsonb, risk_boost_keywords JSONB NOT NULL DEFAULT '[]'::jsonb, risk_reduce_keywords JSONB NOT NULL DEFAULT '[]'::jsonb
+                    );
+                """)
             conn.commit()
 
     await asyncio.to_thread(run)
@@ -522,13 +548,15 @@ async def list_source_health() -> list[SourceHealth]:
     else:
         async with _LOCK:
             by_url = {url: _normalize_source_health(health) for url, health in _SOURCE_HEALTH.items()}
-    for feed_url in settings.feeds:
+    configs = await list_source_configs()
+    config_urls = [source.url for source in configs]
+    for feed_url in (config_urls or settings.feeds):
         by_url.setdefault(feed_url, _normalize_source_health(SourceHealth(source_url=feed_url)))
     return list(by_url.values())
 
 
 def _alert_from_row(row: tuple[Any, ...]) -> Alert:
-    return Alert(id=row[0], item_id=row[1], title=row[2], risk_level=row[3], matched_watchlist_id=row[4], matched_watchlist_name=row[5], reason=row[6], recommended_action=row[7], status=row[8], created_at=_dt(row[9]) or "", updated_at=_dt(row[10]) or "", notes=row[11], org_id=row[12] or "demo")
+    return Alert(id=row[0], item_id=row[1], title=row[2], risk_level=row[3], matched_watchlist_id=row[4], matched_watchlist_name=row[5], reason=row[6], recommended_action=row[7], status=row[8], created_at=_dt(row[9]) or "", updated_at=_dt(row[10]) or "", notes=row[11], org_id=row[12] or "demo", owner=(row[13] if len(row) > 13 else None), due_at=(row[14] if len(row) > 14 else None), severity_override=(row[15] if len(row) > 15 else None), resolution_summary=(row[16] if len(row) > 16 else None))
 
 
 async def list_alerts() -> list[Alert]:
@@ -536,7 +564,7 @@ async def list_alerts() -> list[Alert]:
         def run() -> list[Alert]:
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, item_id, title, risk_level, matched_watchlist_id, matched_watchlist_name, reason, recommended_action, status, created_at, updated_at, notes, org_id FROM alerts ORDER BY created_at DESC;")
+                    cur.execute("SELECT id, item_id, title, risk_level, matched_watchlist_id, matched_watchlist_name, reason, recommended_action, status, created_at, updated_at, notes, org_id, owner, due_at, severity_override, resolution_summary FROM alerts ORDER BY created_at DESC;")
                     return [_alert_from_row(row) for row in cur.fetchall()]
         rows = await asyncio.to_thread(run)
         async with _LOCK:
@@ -570,13 +598,13 @@ async def save_alerts_with_counts(alerts: list[Alert]) -> AlertSaveResult:
                         cur.execute(
                             """
                             INSERT INTO alerts (id, item_id, title, risk_level, matched_watchlist_id, matched_watchlist_name,
-                                reason, recommended_action, status, created_at, updated_at, notes, org_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                reason, recommended_action, status, created_at, updated_at, notes, org_id, owner, due_at, severity_override, resolution_summary)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             ON CONFLICT (item_id, matched_watchlist_id, reason) DO NOTHING
                             RETURNING id, item_id, title, risk_level, matched_watchlist_id, matched_watchlist_name, reason,
-                                      recommended_action, status, created_at, updated_at, notes, org_id;
+                                      recommended_action, status, created_at, updated_at, notes, org_id, owner, due_at, severity_override, resolution_summary;
                             """,
-                            (alert.id, alert.item_id, alert.title, alert.risk_level, alert.matched_watchlist_id, alert.matched_watchlist_name, alert.reason, alert.recommended_action, alert.status, alert.created_at, alert.updated_at, alert.notes, alert.org_id),
+                            (alert.id, alert.item_id, alert.title, alert.risk_level, alert.matched_watchlist_id, alert.matched_watchlist_name, alert.reason, alert.recommended_action, alert.status, alert.created_at, alert.updated_at, alert.notes, alert.org_id, alert.owner, alert.due_at, alert.severity_override, alert.resolution_summary),
                         )
                         row = cur.fetchone()
                         if row:
@@ -610,7 +638,17 @@ async def save_alerts(alerts: list[Alert]) -> list[Alert]:
     return result.all_alerts
 
 
-async def update_alert(alert_id: str, *, status: str | None = None, notes: str | None = None, updated_at: str) -> Alert | None:
+async def update_alert(
+    alert_id: str,
+    *,
+    status: str | None = None,
+    notes: str | None = None,
+    owner: str | None = None,
+    due_at: str | None = None,
+    severity_override: str | None = None,
+    resolution_summary: str | None = None,
+    updated_at: str,
+) -> Alert | None:
     updated: Alert | None = None
     async with _LOCK:
         for alert in _ALERTS:
@@ -619,6 +657,14 @@ async def update_alert(alert_id: str, *, status: str | None = None, notes: str |
                     alert.status = status
                 if notes is not None:
                     alert.notes = notes
+                if owner is not None:
+                    alert.owner = owner
+                if due_at is not None:
+                    alert.due_at = due_at
+                if severity_override is not None:
+                    alert.severity_override = severity_override
+                if resolution_summary is not None:
+                    alert.resolution_summary = resolution_summary
                 alert.updated_at = updated_at
                 updated = alert
                 break
@@ -628,12 +674,14 @@ async def update_alert(alert_id: str, *, status: str | None = None, notes: str |
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        UPDATE alerts SET status = COALESCE(%s, status), notes = COALESCE(%s, notes), updated_at = %s
+                        UPDATE alerts SET status = COALESCE(%s, status), notes = COALESCE(%s, notes), owner = COALESCE(%s, owner),
+                            due_at = COALESCE(%s, due_at), severity_override = COALESCE(%s, severity_override),
+                            resolution_summary = COALESCE(%s, resolution_summary), updated_at = %s
                         WHERE id = %s
                         RETURNING id, item_id, title, risk_level, matched_watchlist_id, matched_watchlist_name, reason,
-                                  recommended_action, status, created_at, updated_at, notes, org_id;
+                                  recommended_action, status, created_at, updated_at, notes, org_id, owner, due_at, severity_override, resolution_summary;
                         """,
-                        (status, notes, updated_at, alert_id),
+                        (status, notes, owner, due_at, severity_override, resolution_summary, updated_at, alert_id),
                     )
                     row = cur.fetchone()
                 conn.commit()
@@ -642,9 +690,133 @@ async def update_alert(alert_id: str, *, status: str | None = None, notes: str |
     return updated
 
 
+async def add_alert_event(event: AlertEvent) -> AlertEvent:
+    async with _LOCK:
+        _ALERT_EVENTS.append(event)
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO alert_events (id, alert_id, event_type, message, created_at) VALUES (%s, %s, %s, %s, %s);", (event.id, event.alert_id, event.event_type, event.message, event.created_at))
+                conn.commit()
+        await asyncio.to_thread(run)
+    return event
+
+
+async def list_alert_events(alert_id: str) -> list[AlertEvent]:
+    if database_enabled():
+        def run() -> list[AlertEvent]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, alert_id, event_type, message, created_at FROM alert_events WHERE alert_id = %s ORDER BY created_at DESC;", (alert_id,))
+                    return [AlertEvent(id=row[0], alert_id=row[1], event_type=row[2], message=row[3], created_at=_dt(row[4]) or "") for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return [event for event in _ALERT_EVENTS if event.alert_id == alert_id]
+
+
+async def add_source_config(source: SourceConfig) -> SourceConfig:
+    async with _LOCK:
+        _SOURCE_CONFIGS.append(source)
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO source_configs (id, url, label, category, enabled, created_at) VALUES (%s, %s, %s, %s, %s, %s);", (source.id, source.url, source.label, source.category, source.enabled, source.created_at))
+                conn.commit()
+        await asyncio.to_thread(run)
+    return source
+
+
+async def list_source_configs() -> list[SourceConfig]:
+    if database_enabled():
+        def run() -> list[SourceConfig]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, url, label, category, enabled, created_at FROM source_configs ORDER BY created_at DESC;")
+                    return [SourceConfig(id=row[0], url=row[1], label=row[2], category=row[3], enabled=bool(row[4]), created_at=_dt(row[5]) or "") for row in cur.fetchall()]
+        rows = await asyncio.to_thread(run)
+        async with _LOCK:
+            _SOURCE_CONFIGS[:] = rows
+        return rows
+    async with _LOCK:
+        return list(_SOURCE_CONFIGS)
+
+
+async def update_source_config(source_id: str, **updates: object) -> SourceConfig | None:
+    updated = None
+    async with _LOCK:
+        for source in _SOURCE_CONFIGS:
+            if source.id == source_id:
+                for key, value in updates.items():
+                    if value is not None:
+                        setattr(source, key, value)
+                updated = source
+                break
+    if database_enabled():
+        def run() -> SourceConfig | None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""UPDATE source_configs SET url = COALESCE(%s, url), label = COALESCE(%s, label), category = COALESCE(%s, category), enabled = COALESCE(%s, enabled) WHERE id = %s RETURNING id, url, label, category, enabled, created_at;""", (updates.get('url'), updates.get('label'), updates.get('category'), updates.get('enabled'), source_id))
+                    row = cur.fetchone()
+                conn.commit()
+                return SourceConfig(id=row[0], url=row[1], label=row[2], category=row[3], enabled=bool(row[4]), created_at=_dt(row[5]) or "") if row else None
+        updated = await asyncio.to_thread(run) or updated
+    return updated
+
+
+async def delete_source_config(source_id: str) -> bool:
+    deleted = False
+    async with _LOCK:
+        before = len(_SOURCE_CONFIGS)
+        _SOURCE_CONFIGS[:] = [source for source in _SOURCE_CONFIGS if source.id != source_id]
+        deleted = len(_SOURCE_CONFIGS) != before
+    if database_enabled():
+        def run() -> bool:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM source_configs WHERE id = %s;", (source_id,))
+                    ok = cur.rowcount > 0
+                conn.commit()
+                return ok
+        deleted = await asyncio.to_thread(run) or deleted
+    return deleted
+
+
+async def get_org_profile(org_id: str) -> OrgScoringProfile:
+    if database_enabled():
+        def run() -> OrgScoringProfile | None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT org_id, high_priority_countries, high_priority_sectors, risk_boost_keywords, risk_reduce_keywords FROM org_scoring_profiles WHERE org_id = %s;", (org_id,))
+                    row = cur.fetchone()
+                    return OrgScoringProfile(row[0], _as_list(row[1]), _as_list(row[2]), _as_list(row[3]), _as_list(row[4])) if row else None
+        profile = await asyncio.to_thread(run)
+        if profile:
+            return profile
+    async with _LOCK:
+        return _ORG_PROFILES.get(org_id, OrgScoringProfile(org_id=org_id))
+
+
+async def put_org_profile(profile: OrgScoringProfile) -> OrgScoringProfile:
+    async with _LOCK:
+        _ORG_PROFILES[profile.org_id] = profile
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""INSERT INTO org_scoring_profiles (org_id, high_priority_countries, high_priority_sectors, risk_boost_keywords, risk_reduce_keywords) VALUES (%s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb) ON CONFLICT (org_id) DO UPDATE SET high_priority_countries = EXCLUDED.high_priority_countries, high_priority_sectors = EXCLUDED.high_priority_sectors, risk_boost_keywords = EXCLUDED.risk_boost_keywords, risk_reduce_keywords = EXCLUDED.risk_reduce_keywords;""", (profile.org_id, _json(profile.high_priority_countries), _json(profile.high_priority_sectors), _json(profile.risk_boost_keywords), _json(profile.risk_reduce_keywords)))
+                conn.commit()
+        await asyncio.to_thread(run)
+    return profile
+
+
 async def reset_memory_state() -> None:
     async with _LOCK:
         _ITEMS.clear()
         _WATCHLISTS.clear()
         _SOURCE_HEALTH.clear()
         _ALERTS.clear()
+        _ALERT_EVENTS.clear()
+        _SOURCE_CONFIGS.clear()
+        _ORG_PROFILES.clear()

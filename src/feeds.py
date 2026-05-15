@@ -31,8 +31,30 @@ def _entry_date(entry: Any) -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _tag_value(block: str, tag: str) -> str:
+    match = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", block, re.IGNORECASE | re.DOTALL)
+    return strip_html(match.group(1)) if match else ""
+
+
+def _parse_feed_fallback(xml_text: str, fallback_source: str) -> list[dict[str, str]]:
+    blocks = re.findall(r"<item[^>]*>(.*?)</item>", xml_text, re.IGNORECASE | re.DOTALL)
+    blocks += re.findall(r"<entry[^>]*>(.*?)</entry>", xml_text, re.IGNORECASE | re.DOTALL)
+    output: list[dict[str, str]] = []
+    for block in blocks:
+        title = _tag_value(block, "title")
+        if not title:
+            continue
+        link = _tag_value(block, "link") or fallback_source
+        summary = shorten(_tag_value(block, "summary") or _tag_value(block, "description"))
+        output.append({"title": title, "summary": summary, "source_url": link.strip(), "created_at": datetime.now(timezone.utc).isoformat()})
+    return output
+
+
 def parse_feed(xml_text: str, fallback_source: str) -> list[dict[str, str]]:
-    import feedparser
+    try:
+        import feedparser
+    except ModuleNotFoundError:
+        return _parse_feed_fallback(xml_text, fallback_source)
 
     parsed = feedparser.parse(xml_text)
     output: list[dict[str, str]] = []

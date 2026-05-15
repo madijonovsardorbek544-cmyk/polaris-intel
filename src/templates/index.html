@@ -59,7 +59,7 @@
       <header class="hero">
         <div>
           <h1>{{ app_name }}</h1>
-          <p class="subtitle">Single-org pilot deployment product for explainable cyber-geopolitical intelligence. Tracks RSS sources, watchlist matches, risk drivers, persistent alert workflow, and a daily brief.</p>
+          <p class="subtitle">Real pilot customer workflow product for explainable cyber-geopolitical intelligence. Tracks RSS sources, watchlist matches, risk drivers, persistent alert workflow, and a daily brief.</p>
         </div>
         <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div></div>
       </header>
@@ -110,6 +110,7 @@
               <input id="wlKeywords" placeholder="Keywords, comma-separated" />
               <input id="wlCves" placeholder="CVEs, comma-separated" />
               <input id="wlActors" placeholder="Threat actors, comma-separated" />
+              <select id="templateSelect"><option value="">Create from template</option><option value="school">School</option><option value="NGO">NGO</option><option value="logistics">Logistics</option><option value="bank">Bank</option><option value="energy">Energy</option><option value="telecom">Telecom</option><option value="government">Government</option></select>
               <button id="createWatchlist">Create</button>
             </div>
             <div id="watchlistNotice" class="notice"></div>
@@ -120,7 +121,7 @@
             <button id="generateAlerts">Generate persistent alerts</button>
             <div id="alertNotice" class="notice"></div>
             <div class="form-grid section">
-              <select id="alertStatus"><option value="all">All statuses</option><option value="open">Open</option><option value="acknowledged">Acknowledged</option><option value="resolved">Resolved</option></select>
+              <select id="alertStatus"><option value="all">All statuses</option><option value="open">Open</option><option value="acknowledged">Acknowledged</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="false_positive">False positive</option></select>
               <select id="alertType"><option value="all">All alert types</option><option value="persisted">Persisted</option><option value="preview">Preview</option></select>
               <input id="alertSearch" placeholder="Search alerts" />
             </div>
@@ -129,6 +130,22 @@
               <textarea id="telegramPreviewText" readonly></textarea>
             </div>
             <div id="alerts" class="list"></div>
+          </section>
+          <section class="panel">
+            <h2>Value report</h2>
+            <div id="valueReport" class="list">Loading value report…</div>
+            <div class="form-grid section"><button id="exportAlerts">Export alerts CSV</button><button id="exportValue">Export value report CSV</button></div>
+          </section>
+          <section class="panel">
+            <h2>Source config</h2>
+            <div class="form-grid">
+              <input id="sourceUrl" placeholder="Source URL" />
+              <input id="sourceLabel" placeholder="Source label" />
+              <select id="sourceCategory"><option value="cyber">Cyber</option><option value="geopolitical">Geopolitical</option><option value="local">Local</option><option value="custom" selected>Custom</option></select>
+              <button id="createSource">Add source</button>
+            </div>
+            <div id="sourceConfigNotice" class="notice"></div>
+            <div id="sourceConfigs" class="list section"></div>
           </section>
           <section class="panel">
             <h2>Source health</h2>
@@ -140,7 +157,7 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
-      const state = { items: [], stats: {}, alerts: { persisted: [], generated_preview: [] }, sources: [], brief: {}, watchlists: [], activeOrg: "{{ default_org }}" };
+      const state = { items: [], stats: {}, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, activeOrg: "{{ default_org }}" };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
       const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
@@ -226,7 +243,7 @@
           const del = document.createElement("button"); del.className = "danger section"; del.textContent = "Delete"; del.addEventListener("click", () => deleteWatchlist(wl.id));
           const actions = document.createElement("div"); actions.className = "form-grid"; actions.append(edit, del);
           el.append(strong, muted, actions); return el;
-        }) : [chip("No watchlists yet")]));
+        }) : [chip("No watchlists yet — Action: Add watchlist")]));
       }
 
       function alertText(alert) { return `${alert.title || ""} ${alert.reason || ""} ${alert.matched_watchlist_name || alert.matched_watchlist || ""}`.toLowerCase(); }
@@ -256,33 +273,60 @@
           const strong = document.createElement("strong"); strong.textContent = `${alert.risk_level}: ${alert.matched_watchlist_name || alert.matched_watchlist}`;
           const status = chip(alert.status || "open", `badge status-${alert.status || "open"}`);
           const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = `${alert.title} — ${alert.reason}`;
+          const owner = document.createElement("input"); owner.placeholder = "Owner"; owner.value = alert.owner || "";
+          const due = document.createElement("input"); due.placeholder = "Due date"; due.type = "date"; due.value = (alert.due_at || "").slice(0, 10);
+          const statusSelect = document.createElement("select"); ["open", "acknowledged", "in_progress", "resolved", "false_positive"].forEach(v => { const o = opt(v); o.textContent = v.replace("_", " "); statusSelect.append(o); }); statusSelect.value = alert.status || "open";
+          const severity = document.createElement("select"); ["", "Critical", "High", "Medium", "Low"].forEach(v => { const o = opt(v); o.textContent = v || "Severity override"; severity.append(o); }); severity.value = alert.severity_override || "";
           const notes = document.createElement("textarea"); notes.placeholder = "Alert notes"; notes.value = alert.notes || "";
-          const ack = document.createElement("button"); ack.textContent = "Acknowledge"; ack.addEventListener("click", () => patchAlert(alert.id, { status: "acknowledged", notes: notes.value }));
-          const resolve = document.createElement("button"); resolve.textContent = "Resolve"; resolve.addEventListener("click", () => patchAlert(alert.id, { status: "resolved", notes: notes.value }));
-          const save = document.createElement("button"); save.textContent = "Save notes"; save.addEventListener("click", () => patchAlert(alert.id, { notes: notes.value }));
+          const resolution = document.createElement("textarea"); resolution.placeholder = "Resolution summary"; resolution.value = alert.resolution_summary || "";
+          const save = document.createElement("button"); save.textContent = "Save alert"; save.addEventListener("click", () => patchAlert(alert.id, { status: statusSelect.value, notes: notes.value, owner: owner.value, due_at: due.value, severity_override: severity.value || null, resolution_summary: resolution.value }));
           const telegram = document.createElement("button"); telegram.textContent = "Telegram preview"; telegram.setAttribute("data-telegram-preview", alert.id); telegram.addEventListener("click", () => telegramPreview(alert.id));
-          const actions = document.createElement("div"); actions.className = "form-grid section"; actions.append(ack, resolve, save, telegram);
-          el.append(strong, status, muted, notes, actions); nodes.push(el);
+          const sendTelegram = document.createElement("button"); sendTelegram.textContent = "Send Telegram"; sendTelegram.addEventListener("click", () => telegramSend(alert.id));
+          const events = document.createElement("div"); events.className = "muted section"; events.textContent = `Events: ${(alert.events || []).map(e => e.event_type).join(", ") || "No recent events"}`;
+          const fields = document.createElement("div"); fields.className = "form-grid section"; fields.append(owner, due, statusSelect, severity, notes, resolution);
+          const actions = document.createElement("div"); actions.className = "form-grid section"; actions.append(save, telegram, sendTelegram);
+          el.append(strong, status, muted, fields, actions, events); nodes.push(el);
         });
         if (previews.length) {
           nodes.push(chip(`${previews.length} generated alert previews. Click Generate persistent alerts to persist them.`));
           previews.slice(0, 8).forEach(alert => nodes.push(previewCard(alert)));
         }
-        if (!nodes.length) nodes.push(chip("No alert-ready watchlist matches"));
+        if (!nodes.length) nodes.push(chip("No alerts exist — Action: Generate alerts"));
         $("alerts").replaceChildren(...nodes);
       }
 
       function renderSidebars() {
         $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
         $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
-        renderWatchlists(); renderAlerts();
-        $("sources").replaceChildren(...state.sources.slice(0, 8).map(src => {
+        renderWatchlists(); renderAlerts(); renderValueReport(); renderSourceConfigs();
+        if (!state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
+        $("sources").replaceChildren(...(state.sources.length ? state.sources.slice(0, 8).map(src => {
           const el = document.createElement("div"); el.className = "mini";
           const statusClass = src.status === "failing" ? "err" : (src.status === "healthy" ? "ok" : "muted");
           const strong = document.createElement("strong"); strong.className = statusClass; strong.textContent = (src.status || "pending").toUpperCase();
           const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = `${src.source_url} · current failures ${src.consecutive_failure_count || 0} · total failures ${src.total_failure_count || 0} · empty ${src.empty_count || 0}${src.last_error ? ` · ${src.last_error}` : ""}`;
           el.append(strong, muted); return el;
-        }));
+        }) : [chip("No source health yet — Action: Add source")]));
+      }
+
+      function renderValueReport() {
+        const r = state.valueReport || {};
+        $("valueReport").replaceChildren(
+          chip(`${r.total_items_monitored || 0} items monitored`), chip(`${r.total_alerts || 0} alerts`), chip(`${r.unresolved_alerts || 0} unresolved`),
+          ...((r.recommended_next_actions || []).map(a => chip(a)))
+        );
+      }
+
+      function renderSourceConfigs() {
+        $("sourceConfigs").replaceChildren(...(state.sourceConfigs.length ? state.sourceConfigs.map(src => {
+          const el = document.createElement("div"); el.className = "mini";
+          const strong = document.createElement("strong"); strong.textContent = `${src.enabled ? "Enabled" : "Disabled"}: ${src.label}`;
+          const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = `${src.category} · ${src.url}`;
+          const toggle = document.createElement("button"); toggle.textContent = src.enabled ? "Disable" : "Enable"; toggle.addEventListener("click", () => patchSource(src.id, { enabled: !src.enabled }));
+          const del = document.createElement("button"); del.className = "danger"; del.textContent = "Delete"; del.addEventListener("click", () => deleteSource(src.id));
+          const actions = document.createElement("div"); actions.className = "form-grid section"; actions.append(toggle, del);
+          el.append(strong, muted, actions); return el;
+        }) : [chip("No custom sources yet — Action: Add source")]));
       }
 
       function applyFilters() {
@@ -297,12 +341,13 @@
         try {
           state.activeOrg = activeOrg(); $("activeOrgLabel").textContent = state.activeOrg; $("wlOrg").value = $("wlOrg").value.trim() || state.activeOrg;
           const headers = adminHeaders();
-          const [itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes] = await Promise.all([
-            fetch(`/api/items?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/alerts?${orgQuery()}`, { cache: "no-store", headers }), fetch("/api/sources", { cache: "no-store", headers }), fetch(`/api/brief/daily?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/watchlists?${orgQuery()}`, { cache: "no-store", headers })
+          const [itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes, templatesRes, valueRes, sourceConfigsRes] = await Promise.all([
+            fetch(`/api/items?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/alerts?${orgQuery()}`, { cache: "no-store", headers }), fetch("/api/sources", { cache: "no-store", headers }), fetch(`/api/brief/daily?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/watchlists?${orgQuery()}`, { cache: "no-store", headers }), fetch("/api/onboarding/template", { cache: "no-store", headers }), fetch(`/api/reports/value?${orgQuery()}&days=7`, { cache: "no-store", headers }), fetch("/api/source-configs", { cache: "no-store", headers })
           ]);
-          if ([itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes].some(r => r.status === 401)) throw new Error("Read blocked: invalid or missing API key.");
-          if (![itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes].every(r => r.ok)) throw new Error("API request failed");
-          state.items = await itemsRes.json(); state.alerts = await alertsRes.json(); state.sources = await sourcesRes.json(); state.brief = await briefRes.json(); state.watchlists = await watchlistsRes.json();
+          if ([itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes, templatesRes, valueRes, sourceConfigsRes].some(r => r.status === 401)) throw new Error("Read blocked: invalid or missing API key. Action: Add API key.");
+          if (![itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes, templatesRes, valueRes, sourceConfigsRes].every(r => r.ok)) throw new Error("API request failed");
+          state.items = await itemsRes.json(); state.alerts = await alertsRes.json(); state.sources = await sourcesRes.json(); state.brief = await briefRes.json(); state.watchlists = await watchlistsRes.json(); state.templates = (await templatesRes.json()).templates || {}; state.valueReport = await valueRes.json(); state.sourceConfigs = await sourceConfigsRes.json();
+          await Promise.all((state.alerts.persisted || []).map(async alert => { const r = await fetch(`/api/alerts/${alert.id}/events`, { cache: "no-store", headers }); alert.events = r.ok ? await r.json() : []; }));
           hydrateFilters(); renderStats(); renderSidebars(); applyFilters(); $("status").textContent = `Status: OK · ${state.activeOrg} · ${state.items.length} items`; $("status").classList.remove("err");
         } catch (err) { $("status").textContent = `Status: ERROR · ${err.message}`; $("status").classList.add("err"); renderCards([]); }
       }
@@ -316,6 +361,18 @@
           await load();
         } catch (err) { setNotice("authNotice", err.message || "Refresh failed"); }
         finally { b.disabled = false; b.textContent = "Refresh"; }
+      }
+
+      function applyTemplate() {
+        const key = $("templateSelect").value; const tpl = state.templates[key];
+        if (!tpl) return;
+        $("wlName").value = `${key} watchlist`;
+        $("wlCountries").value = (tpl.suggested_countries || []).join(", ");
+        $("wlSectors").value = (tpl.suggested_sectors || []).join(", ");
+        $("wlKeywords").value = (tpl.suggested_keywords || []).join(", ");
+        $("wlCves").value = (tpl.suggested_cves || []).join(", ");
+        $("wlActors").value = (tpl.suggested_threat_actors || []).join(", ");
+        setNotice("watchlistNotice", tpl.explanation || "Template applied. Edit before saving.", true);
       }
 
       async function createWatchlist() {
@@ -353,6 +410,17 @@
         finally { b.disabled = false; }
       }
 
+      async function createSource() {
+        setNotice("sourceConfigNotice", "");
+        const payload = { url: $("sourceUrl").value.trim(), label: $("sourceLabel").value.trim(), category: $("sourceCategory").value, enabled: true };
+        try { const res = await fetch("/api/source-configs", { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
+          if (res.status === 401) { setNotice("sourceConfigNotice", "Source create blocked: invalid or missing API key."); return; }
+          if (!res.ok) throw new Error("Source create failed"); setNotice("sourceConfigNotice", "Source added.", true); await load();
+        } catch (err) { setNotice("sourceConfigNotice", err.message || "Source create failed"); }
+      }
+      async function patchSource(id, payload) { const res = await fetch(`/api/source-configs/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) }); if (res.status === 401) setNotice("sourceConfigNotice", "Source update blocked: invalid or missing API key."); await load(); }
+      async function deleteSource(id) { const res = await fetch(`/api/source-configs/${id}`, { method: "DELETE", headers: adminHeaders() }); if (res.status === 401) setNotice("sourceConfigNotice", "Source delete blocked: invalid or missing API key."); await load(); }
+
       async function telegramPreview(id) {
         setNotice("alertNotice", "");
         try {
@@ -363,6 +431,16 @@
           $("telegramPreviewText").value = payload.message || "";
           $("telegramPreviewPanel").style.display = "block";
         } catch (err) { setNotice("alertNotice", err.message || "Telegram preview failed"); }
+      }
+
+      async function telegramSend(id) {
+        setNotice("alertNotice", "");
+        try { const res = await fetch(`/api/alerts/${id}/telegram-send`, { method: "POST", headers: adminHeaders() });
+          const payload = await res.json().catch(() => ({}));
+          if (res.status === 401) { setNotice("alertNotice", "Telegram send blocked: invalid or missing API key."); return; }
+          if (!res.ok) throw new Error(payload.detail || "Telegram send failed");
+          setNotice("alertNotice", payload.detail || "Telegram sent.", true); await load();
+        } catch (err) { setNotice("alertNotice", err.message || "Telegram send failed"); }
       }
 
       async function deleteWatchlist(id) {
@@ -383,6 +461,10 @@
 
       $("refresh").addEventListener("click", refreshNow);
       $("createWatchlist").addEventListener("click", createWatchlist);
+      $("templateSelect").addEventListener("change", applyTemplate);
+      $("createSource").addEventListener("click", createSource);
+      $("exportAlerts").addEventListener("click", () => window.location = `/api/export/alerts.csv?${orgQuery()}`);
+      $("exportValue").addEventListener("click", () => window.location = `/api/export/value-report.csv?${orgQuery()}&days=7`);
       $("generateAlerts").addEventListener("click", generateAlerts);
       controls.forEach(control => control.addEventListener("input", applyFilters));
       alertControls.forEach(control => control.addEventListener("input", renderAlerts));

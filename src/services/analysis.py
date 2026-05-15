@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime, timezone
 
 from ..entities import extract_entities, uniq_keep_order
-from ..models import IntelligenceItem, Watchlist, WatchlistMatch
+from ..models import IntelligenceItem, OrgScoringProfile, Watchlist, WatchlistMatch
 from ..scoring import calculate_confidence_score_with_factors, calculate_risk_score_with_factors, matching_risk_signals, risk_level, source_domain
 
 
@@ -122,7 +122,34 @@ def recommended_action(risk: str, category: str, entities: dict[str, list[str]],
     return "Track passively; no immediate action unless the item becomes relevant to a watchlist."
 
 
-def analyze_item(title: str, summary: str, source_url: str, watchlists: list[Watchlist] | None = None, created_at: str | None = None) -> IntelligenceItem:
+def apply_org_profile_adjustment(risk_score: int, risk_factors: list[str], title: str, summary: str, entities: dict[str, list[str]], profile: OrgScoringProfile | None) -> tuple[int, list[str]]:
+    if not profile:
+        return risk_score, risk_factors
+    text = f"{title or ''} {summary or ''}".lower()
+    countries = {country.lower() for country in entities.get("countries", [])}
+    sectors = {sector.lower() for sector in entities.get("sectors", [])}
+    adjusted = risk_score
+    factors = list(risk_factors)
+    matched_countries = [c for c in profile.high_priority_countries if c.lower() in countries]
+    matched_sectors = [s for s in profile.high_priority_sectors if s.lower() in sectors]
+    boost_keywords = [k for k in profile.risk_boost_keywords if k.strip() and k.lower() in text]
+    reduce_keywords = [k for k in profile.risk_reduce_keywords if k.strip() and k.lower() in text]
+    if matched_countries:
+        adjusted += 8
+        factors.append(f"Org profile boost: high-priority countries {', '.join(matched_countries[:3])}.")
+    if matched_sectors:
+        adjusted += 8
+        factors.append(f"Org profile boost: high-priority sectors {', '.join(matched_sectors[:3])}.")
+    if boost_keywords:
+        adjusted += 6
+        factors.append(f"Org profile boost: risk keywords {', '.join(boost_keywords[:3])}.")
+    if reduce_keywords:
+        adjusted -= 10
+        factors.append(f"Org profile reduction: lower-priority keywords {', '.join(reduce_keywords[:3])}.")
+    return max(0, min(100, adjusted)), factors
+
+
+def analyze_item(title: str, summary: str, source_url: str, watchlists: list[Watchlist] | None = None, created_at: str | None = None, org_profiles: dict[str, OrgScoringProfile] | None = None) -> IntelligenceItem:
     watchlists = watchlists or []
     entities = extract_entities(title, summary)
     watchlist_matches = explain_watchlist_matches(title, summary, entities, watchlists)
@@ -136,6 +163,9 @@ def analyze_item(title: str, summary: str, source_url: str, watchlists: list[Wat
         sectors=entities["sectors"],
         watchlist_relevant=relevant,
     )
+    matched_orgs = {match.org_id for match in watchlist_matches}
+    for org_id in matched_orgs:
+        risk_score, risk_factors = apply_org_profile_adjustment(risk_score, risk_factors, title, summary, entities, (org_profiles or {}).get(org_id))
     level = risk_level(risk_score)
     category = classify_category(title, summary)
     confidence, confidence_factors = calculate_confidence_score_with_factors(
