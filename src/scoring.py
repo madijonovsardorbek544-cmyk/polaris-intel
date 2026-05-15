@@ -14,6 +14,39 @@ SOURCE_RELIABILITY = {
     "aljazeera.com": 8,
 }
 
+
+CYBER_NEWS_DOMAINS = {"bleepingcomputer.com", "darkreading.com", "thehackernews.com"}
+WORLD_NEWS_DOMAINS = {"reuters", "bbc", "aljazeera.com"}
+
+
+def source_type(url: str) -> str:
+    domain = source_domain(url)
+    if "cisa.gov" in domain:
+        return "official"
+    if any(key in domain for key in CYBER_NEWS_DOMAINS):
+        return "cyber-news"
+    if any(key in domain for key in WORLD_NEWS_DOMAINS):
+        return "world-news"
+    return "custom"
+
+
+def source_reliability_tier(url: str) -> str:
+    domain = source_domain(url)
+    if "cisa.gov" in domain:
+        return "High"
+    if any(key in domain for key in {"bleepingcomputer.com", "darkreading.com"}):
+        return "High"
+    if any(key in domain for key in CYBER_NEWS_DOMAINS | WORLD_NEWS_DOMAINS):
+        return "Medium"
+    return "Medium" if domain else "Low"
+
+
+def evidence_summary_for_source(url: str, title: str, summary: str) -> str:
+    stype = source_type(url)
+    tier = source_reliability_tier(url)
+    domain = source_domain(url) or "the reported source"
+    return f"{tier} reliability {stype} source ({domain}) provides the primary evidence for this signal."
+
 HIGH_ATTENTION_COUNTRIES = {"Russia", "Ukraine", "China", "Taiwan", "Iran", "Israel", "NATO", "USA"}
 HIGH_IMPACT_SECTORS = {"government", "energy", "telecom", "healthcare", "banking", "defense"}
 ACTIVE_EXPLOIT_TERMS = ["actively exploited", "active exploitation", "known exploited", "in the wild"]
@@ -98,7 +131,7 @@ def calculate_risk_score_with_factors(
     factors = ["Base intelligence signal +15"]
     score = 15
 
-    reliability = source_reliability_score(source_url)
+    reliability = min(8, source_reliability_score(source_url))
     if reliability:
         score += reliability
         factors.append(f"{source_reliability_label(source_url)} source reliability +{reliability}")
@@ -175,10 +208,17 @@ def calculate_confidence_score_with_factors(
 ) -> tuple[int, list[str]]:
     factors = ["Base confidence +30"]
     score = 30
-    reliability = min(25, source_reliability_score(source_url))
+    stype = source_type(source_url)
+    tier = source_reliability_tier(source_url)
+    reliability = {"High": 20, "Medium": 12, "Low": 4}.get(tier, 8)
     if reliability:
         score += reliability
-        factors.append(f"{source_reliability_label(source_url)} source corroboration +{reliability}")
+        if stype == "official":
+            factors.append("Official source reliability +20")
+        elif stype == "cyber-news":
+            factors.append("Cyber news source +12")
+        else:
+            factors.append(f"{source_reliability_label(source_url)} source corroboration +{reliability}")
 
     entity_count = sum(len(values) for values in entities.values())
     if entity_count:

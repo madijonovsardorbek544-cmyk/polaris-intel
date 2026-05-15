@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
-from .models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, PilotLead, PublicMetrics, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
+from .models import Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, PublicMetrics, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
 
 _ITEMS: list[IntelligenceItem] = []
 _WATCHLISTS: list[Watchlist] = []
@@ -18,6 +18,7 @@ _SOURCE_CONFIGS: list[SourceConfig] = []
 _ORG_PROFILES: dict[str, OrgScoringProfile] = {}
 _PILOT_LEADS: list[PilotLead] = []
 _PUBLIC_METRICS = PublicMetrics()
+_FEEDBACK: list[ItemFeedback] = []
 _LOCK = asyncio.Lock()
 
 
@@ -160,6 +161,10 @@ async def init_db() -> None:
                 cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS risk_factors JSONB NOT NULL DEFAULT '[]'::jsonb;")
                 cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS confidence_factors JSONB NOT NULL DEFAULT '[]'::jsonb;")
                 cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS watchlist_matches JSONB NOT NULL DEFAULT '[]'::jsonb;")
+                cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS source_reliability TEXT NOT NULL DEFAULT 'Medium';")
+                cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'custom';")
+                cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS evidence_links JSONB NOT NULL DEFAULT '[]'::jsonb;")
+                cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS evidence_summary TEXT NOT NULL DEFAULT '';")
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS watchlists (
@@ -274,6 +279,17 @@ async def init_db() -> None:
                         metric_value INTEGER NOT NULL DEFAULT 0
                     );
                 """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS item_feedback (
+                        id TEXT PRIMARY KEY,
+                        item_id TEXT NOT NULL,
+                        relevance TEXT NOT NULL,
+                        severity_feedback TEXT NOT NULL,
+                        org_id TEXT NOT NULL,
+                        comment TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL
+                    );
+                """)
             conn.commit()
 
     await asyncio.to_thread(run)
@@ -284,7 +300,9 @@ def _item_from_row(row: tuple[Any, ...]) -> IntelligenceItem:
         id=row[0], title=row[1], summary=row[2], category=row[3], risk_score=row[4], risk_level=row[5], confidence_score=row[6],
         source_url=row[7], source_domain=row[8], tags=_as_list(row[9]), entities=_as_dict(row[10]), affected_countries=_as_list(row[11]),
         affected_sectors=_as_list(row[12]), why_it_matters=row[13], recommended_action=row[14], created_at=_dt(row[15]) or "",
-        ingested_at=_dt(row[16]) or "", risk_factors=_as_list(row[17]), confidence_factors=_as_list(row[18]), watchlist_matches=_matches_from_json(row[19])
+        ingested_at=_dt(row[16]) or "", risk_factors=_as_list(row[17]), confidence_factors=_as_list(row[18]), watchlist_matches=_matches_from_json(row[19]),
+        source_reliability=row[20] if len(row) > 20 else "Medium", source_type=row[21] if len(row) > 21 else "custom",
+        evidence_links=_as_list(row[22]) if len(row) > 22 else ([row[7]] if row[7] else []), evidence_summary=row[23] if len(row) > 23 else "",
     )
 
 
@@ -307,9 +325,9 @@ async def save_items(items: list[IntelligenceItem]) -> None:
                         INSERT INTO intel_items
                         (id, title, summary, category, risk_score, risk_level, confidence_score, source_url, source_domain,
                          tags, entities, affected_countries, affected_sectors, why_it_matters, recommended_action, created_at,
-                         ingested_at, risk_factors, confidence_factors, watchlist_matches)
+                         ingested_at, risk_factors, confidence_factors, watchlist_matches, source_reliability, source_type, evidence_links, evidence_summary)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
-                                %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+                                %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s::jsonb, %s)
                         ON CONFLICT (id) DO UPDATE SET
                             title = EXCLUDED.title, summary = EXCLUDED.summary, category = EXCLUDED.category,
                             risk_score = EXCLUDED.risk_score, risk_level = EXCLUDED.risk_level,
@@ -318,12 +336,15 @@ async def save_items(items: list[IntelligenceItem]) -> None:
                             affected_countries = EXCLUDED.affected_countries, affected_sectors = EXCLUDED.affected_sectors,
                             why_it_matters = EXCLUDED.why_it_matters, recommended_action = EXCLUDED.recommended_action,
                             ingested_at = EXCLUDED.ingested_at, risk_factors = EXCLUDED.risk_factors,
-                            confidence_factors = EXCLUDED.confidence_factors, watchlist_matches = EXCLUDED.watchlist_matches;
+                            confidence_factors = EXCLUDED.confidence_factors, watchlist_matches = EXCLUDED.watchlist_matches,
+                            source_reliability = EXCLUDED.source_reliability, source_type = EXCLUDED.source_type,
+                            evidence_links = EXCLUDED.evidence_links, evidence_summary = EXCLUDED.evidence_summary;
                         """,
                         (item.id, item.title, item.summary, item.category, item.risk_score, item.risk_level, item.confidence_score,
                          item.source_url, item.source_domain, _json(item.tags), json.dumps(item.entities or {}), _json(item.affected_countries),
                          _json(item.affected_sectors), item.why_it_matters, item.recommended_action, item.created_at, item.ingested_at,
-                         _json(item.risk_factors), _json(item.confidence_factors), _matches_to_json(item.watchlist_matches)),
+                         _json(item.risk_factors), _json(item.confidence_factors), _matches_to_json(item.watchlist_matches),
+                         item.source_reliability, item.source_type, _json(item.evidence_links), item.evidence_summary),
                     )
             conn.commit()
     await asyncio.to_thread(run)
@@ -339,7 +360,8 @@ async def list_items(limit: int | None = None) -> list[IntelligenceItem]:
                         """
                         SELECT id, title, summary, category, risk_score, risk_level, confidence_score, source_url, source_domain,
                                tags, entities, affected_countries, affected_sectors, why_it_matters, recommended_action,
-                               created_at, ingested_at, risk_factors, confidence_factors, watchlist_matches
+                               created_at, ingested_at, risk_factors, confidence_factors, watchlist_matches,
+                               source_reliability, source_type, evidence_links, evidence_summary
                         FROM intel_items ORDER BY risk_score DESC, ingested_at DESC LIMIT %s;
                         """,
                         (limit,),
@@ -844,6 +866,7 @@ async def reset_memory_state() -> None:
         _SOURCE_CONFIGS.clear()
         _ORG_PROFILES.clear()
         _PILOT_LEADS.clear()
+        _FEEDBACK.clear()
         _PUBLIC_METRICS.landing_page_views = 0
         _PUBLIC_METRICS.demo_page_views = 0
         _PUBLIC_METRICS.pilot_form_submissions = 0
@@ -887,7 +910,7 @@ async def add_pilot_lead(lead: PilotLead) -> PilotLead:
     return lead
 
 
-async def list_pilot_leads(limit: int = 50) -> list[PilotLead]:
+async def list_pilot_leads(limit: int = 50, status: str | None = None) -> list[PilotLead]:
     if database_enabled():
         def run() -> list[PilotLead]:
             with _psycopg().connect(settings.database_url) as conn:
@@ -897,15 +920,17 @@ async def list_pilot_leads(limit: int = 50) -> list[PilotLead]:
                         SELECT id, name, organization, role, email, country, organization_type, problem_description,
                                preferred_contact_method, created_at, status
                         FROM pilot_leads
+                        WHERE (%s IS NULL OR status = %s)
                         ORDER BY created_at DESC
                         LIMIT %s;
                         """,
-                        (limit,),
+                        (status, status, limit),
                     )
                     return [_lead_from_row(row) for row in cur.fetchall()]
         return await asyncio.to_thread(run)
     async with _LOCK:
-        return list(_PILOT_LEADS[:limit])
+        leads = [lead for lead in _PILOT_LEADS if status is None or lead.status == status]
+        return list(leads[:limit])
 
 
 async def update_pilot_lead_status(lead_id: str, status: str) -> PilotLead | None:
@@ -976,3 +1001,52 @@ async def get_public_metrics() -> PublicMetrics:
             demo_page_views=_PUBLIC_METRICS.demo_page_views,
             pilot_form_submissions=_PUBLIC_METRICS.pilot_form_submissions,
         )
+
+
+def _feedback_from_row(row: tuple[Any, ...]) -> ItemFeedback:
+    return ItemFeedback(
+        id=row[0],
+        item_id=row[1],
+        relevance=row[2],
+        severity_feedback=row[3],
+        org_id=row[4],
+        comment=row[5] or "",
+        created_at=_dt(row[6]) or "",
+    )
+
+
+async def add_item_feedback(feedback: ItemFeedback) -> ItemFeedback:
+    async with _LOCK:
+        _FEEDBACK.insert(0, feedback)
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO item_feedback (id, item_id, relevance, severity_feedback, org_id, comment, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                        """,
+                        (feedback.id, feedback.item_id, feedback.relevance, feedback.severity_feedback, feedback.org_id, feedback.comment, feedback.created_at),
+                    )
+                conn.commit()
+        await asyncio.to_thread(run)
+    return feedback
+
+
+async def list_item_feedback(limit: int = 200) -> list[ItemFeedback]:
+    if database_enabled():
+        def run() -> list[ItemFeedback]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id, item_id, relevance, severity_feedback, org_id, comment, created_at
+                        FROM item_feedback ORDER BY created_at DESC LIMIT %s;
+                        """,
+                        (limit,),
+                    )
+                    return [_feedback_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return list(_FEEDBACK[:limit])

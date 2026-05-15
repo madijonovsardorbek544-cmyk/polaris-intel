@@ -77,8 +77,9 @@ def test_lead_api_validation_and_protection(monkeypatch) -> None:
     created = c.post("/api/leads", json=VALID_LEAD)
     assert created.status_code == 201
     payload = created.json()
-    assert payload["email"] == VALID_LEAD["email"]
-    assert payload["status"] == "new"
+    assert payload["ok"] is True
+    assert payload["message"] == "Pilot request received."
+    assert "email" not in payload
 
     bad_email = {**VALID_LEAD, "email": "not-an-email"}
     assert c.post("/api/leads", json=bad_email).status_code in {400, 422}
@@ -92,7 +93,7 @@ def test_lead_api_validation_and_protection(monkeypatch) -> None:
     assert protected.status_code == 200
     assert protected.json()[0]["name"] == VALID_LEAD["name"]
 
-    lead_id = payload["id"]
+    lead_id = payload["lead_id"]
     patched = c.patch(
         f"/api/leads/{lead_id}",
         headers={"X-Polaris-API-Key": "lead-secret"},
