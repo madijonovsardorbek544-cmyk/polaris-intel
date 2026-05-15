@@ -1,7 +1,32 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _load_env_file(path: str = ".env") -> None:
+    dotenv_spec = importlib.util.find_spec("dotenv")
+    if dotenv_spec is not None:
+        dotenv = __import__("dotenv")
+        dotenv.load_dotenv(path)
+        return
+
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+_load_env_file()
 
 
 DEFAULT_FEEDS = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -13,6 +14,9 @@ from .routes.health import router as health_router
 from .routes.intelligence import router as intelligence_router
 from .routes.watchlists import router as watchlists_router
 from .services.ingestion import background_refresh_loop, refresh_store, refresh_status
+
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -31,8 +35,8 @@ async def startup_event() -> None:
     await init_db()
     try:
         await refresh_store(force=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Startup refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
     if not _bg_task_started:
         _bg_task_started = True
         asyncio.create_task(background_refresh_loop())
@@ -42,8 +46,8 @@ async def startup_event() -> None:
 async def home(request: Request) -> HTMLResponse:
     try:
         await refresh_store(force=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Dashboard refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
     items = await list_items(settings.max_items)
     return templates.TemplateResponse(
         "index.html",

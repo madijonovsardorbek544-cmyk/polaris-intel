@@ -4,6 +4,15 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class WatchlistMatch:
+    watchlist_id: str
+    watchlist_name: str
+    matched_on: str
+    matched_value: str
+    reason: str
+
+
+@dataclass
 class IntelligenceItem:
     id: str
     title: str
@@ -22,6 +31,9 @@ class IntelligenceItem:
     recommended_action: str
     created_at: str
     ingested_at: str
+    risk_factors: list[str] = field(default_factory=list)
+    confidence_factors: list[str] = field(default_factory=list)
+    watchlist_matches: list[WatchlistMatch] = field(default_factory=list)
 
 
 @dataclass
@@ -35,3 +47,12 @@ class Watchlist:
     cves: list[str] = field(default_factory=list)
     threat_actors: list[str] = field(default_factory=list)
     created_at: str = ""
+
+
+@dataclass
+class SourceHealth:
+    source_url: str
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    failure_count: int = 0
+    last_error: str | None = None

@@ -4,8 +4,8 @@ import hashlib
 from datetime import datetime, timezone
 
 from ..entities import extract_entities, uniq_keep_order
-from ..models import IntelligenceItem, Watchlist
-from ..scoring import calculate_confidence_score, calculate_risk_score, matching_risk_signals, risk_level, source_domain
+from ..models import IntelligenceItem, Watchlist, WatchlistMatch
+from ..scoring import calculate_confidence_score_with_factors, calculate_risk_score_with_factors, matching_risk_signals, risk_level, source_domain
 
 
 def now_iso() -> str:
@@ -30,26 +30,50 @@ def classify_category(title: str, summary: str) -> str:
     return "General"
 
 
-def watchlist_relevance(title: str, summary: str, entities: dict[str, list[str]], watchlists: list[Watchlist]) -> bool:
+def explain_watchlist_matches(
+    title: str, summary: str, entities: dict[str, list[str]], watchlists: list[Watchlist]
+) -> list[WatchlistMatch]:
     text = f"{title or ''} {summary or ''}".lower()
-    cves = {cve.lower() for cve in entities.get("cves", [])}
-    countries = {country.lower() for country in entities.get("countries", [])}
-    sectors = {sector.lower() for sector in entities.get("sectors", [])}
+    cves = {cve.lower(): cve for cve in entities.get("cves", [])}
+    countries = {country.lower(): country for country in entities.get("countries", [])}
+    sectors = {sector.lower(): sector for sector in entities.get("sectors", [])}
+    matches: list[WatchlistMatch] = []
+
+    def add(watchlist: Watchlist, matched_on: str, value: str, reason: str) -> None:
+        matches.append(
+            WatchlistMatch(
+                watchlist_id=watchlist.id,
+                watchlist_name=watchlist.name,
+                matched_on=matched_on,
+                matched_value=value,
+                reason=reason,
+            )
+        )
 
     for watchlist in watchlists:
-        if any(country.lower() in countries for country in watchlist.countries):
-            return True
-        if any(sector.lower() in sectors for sector in watchlist.sectors):
-            return True
-        if any(cve.lower() in cves for cve in watchlist.cves):
-            return True
-        if any(keyword.lower() in text for keyword in watchlist.keywords):
-            return True
-        if any(org.lower() in text for org in watchlist.organizations):
-            return True
-        if any(actor.lower() in text for actor in watchlist.threat_actors):
-            return True
-    return False
+        for country in watchlist.countries:
+            if country.lower() in countries:
+                add(watchlist, "country", countries[country.lower()], f"Country {countries[country.lower()]} matched watchlist {watchlist.name}")
+        for sector in watchlist.sectors:
+            if sector.lower() in sectors:
+                add(watchlist, "sector", sectors[sector.lower()], f"Sector {sectors[sector.lower()]} matched watchlist {watchlist.name}")
+        for cve in watchlist.cves:
+            if cve.lower() in cves:
+                add(watchlist, "cve", cves[cve.lower()], f"CVE {cves[cve.lower()]} matched watchlist {watchlist.name}")
+        for keyword in watchlist.keywords:
+            if keyword.lower() in text:
+                add(watchlist, "keyword", keyword, f"Keyword {keyword} appeared in the item text")
+        for org in watchlist.organizations:
+            if org.lower() in text:
+                add(watchlist, "organization", org, f"Organization {org} appeared in the item text")
+        for actor in watchlist.threat_actors:
+            if actor.lower() in text:
+                add(watchlist, "threat_actor", actor, f"Threat actor {actor} appeared in the item text")
+    return matches
+
+
+def watchlist_relevance(title: str, summary: str, entities: dict[str, list[str]], watchlists: list[Watchlist]) -> bool:
+    return bool(explain_watchlist_matches(title, summary, entities, watchlists))
 
 
 def build_tags(category: str, entities: dict[str, list[str]], risk_signals: list[str], watchlist_relevant: bool) -> list[str]:
@@ -100,9 +124,10 @@ def recommended_action(risk: str, category: str, entities: dict[str, list[str]],
 def analyze_item(title: str, summary: str, source_url: str, watchlists: list[Watchlist] | None = None, created_at: str | None = None) -> IntelligenceItem:
     watchlists = watchlists or []
     entities = extract_entities(title, summary)
-    relevant = watchlist_relevance(title, summary, entities, watchlists)
+    watchlist_matches = explain_watchlist_matches(title, summary, entities, watchlists)
+    relevant = bool(watchlist_matches)
     risk_signals = matching_risk_signals(title, summary)
-    risk_score = calculate_risk_score(
+    risk_score, risk_factors = calculate_risk_score_with_factors(
         title=title,
         summary=summary,
         source_url=source_url,
@@ -112,7 +137,7 @@ def analyze_item(title: str, summary: str, source_url: str, watchlists: list[Wat
     )
     level = risk_level(risk_score)
     category = classify_category(title, summary)
-    confidence = calculate_confidence_score(
+    confidence, confidence_factors = calculate_confidence_score_with_factors(
         title=title,
         summary=summary,
         source_url=source_url,
@@ -137,4 +162,7 @@ def analyze_item(title: str, summary: str, source_url: str, watchlists: list[Wat
         recommended_action=recommended_action(level, category, entities, relevant),
         created_at=created_at or now_iso(),
         ingested_at=now_iso(),
+        risk_factors=risk_factors,
+        confidence_factors=confidence_factors,
+        watchlist_matches=watchlist_matches,
     )

@@ -56,6 +56,14 @@ def source_reliability_score(url: str) -> int:
     return 5 if domain else 0
 
 
+def source_reliability_label(url: str) -> str:
+    domain = source_domain(url)
+    for key in SOURCE_RELIABILITY:
+        if key in domain:
+            return key.upper() if key == "cisa.gov" else key
+    return domain or "Unknown source"
+
+
 def risk_level(score: int) -> str:
     if score >= 85:
         return "Critical"
@@ -77,6 +85,66 @@ def matching_risk_signals(title: str, summary: str) -> list[str]:
     return list(dict.fromkeys(signals))
 
 
+def calculate_risk_score_with_factors(
+    *,
+    title: str,
+    summary: str,
+    source_url: str,
+    countries: list[str],
+    sectors: list[str],
+    watchlist_relevant: bool = False,
+) -> tuple[int, list[str]]:
+    text = f"{title or ''} {summary or ''}".lower()
+    factors = ["Base intelligence signal +15"]
+    score = 15
+
+    reliability = source_reliability_score(source_url)
+    if reliability:
+        score += reliability
+        factors.append(f"{source_reliability_label(source_url)} source reliability +{reliability}")
+
+    cves = extract_cves(text)
+    if cves:
+        weight = min(25, 10 + len(cves) * 5)
+        score += weight
+        factors.append(f"CVE detected +{weight}")
+
+    if any(term in text for term in ACTIVE_EXPLOIT_TERMS):
+        score += 20
+        factors.append("Active exploitation language +20")
+
+    for term, weight in CYBER_RISK_TERMS.items():
+        if term in text:
+            score += weight
+            factors.append(f"Cyber risk term: {term} +{weight}")
+
+    matched_countries = [country for country in countries if country in HIGH_ATTENTION_COUNTRIES]
+    if matched_countries:
+        score += 8
+        factors.append(f"High-attention geography: {', '.join(matched_countries[:3])} +8")
+
+    matched_sectors = [sector for sector in sectors if sector in HIGH_IMPACT_SECTORS]
+    if matched_sectors:
+        score += 10
+        factors.append(f"High-impact sector: {', '.join(matched_sectors[:3])} +10")
+
+    escalation_hits = [term for term in GEOPOLITICAL_ESCALATION_TERMS if term in text]
+    if escalation_hits:
+        weight = min(20, len(escalation_hits) * 5)
+        score += weight
+        factors.append(f"Geopolitical escalation language +{weight}")
+
+    if watchlist_relevant:
+        score += 12
+        factors.append("Watchlist match +12")
+
+    if "no evidence of exploitation" in text or "no imminent threat" in text:
+        score -= 10
+        factors.append("De-escalating language -10")
+
+    return clamp(score), factors
+
+
 def calculate_risk_score(
     *,
     title: str,
@@ -86,35 +154,55 @@ def calculate_risk_score(
     sectors: list[str],
     watchlist_relevant: bool = False,
 ) -> int:
-    text = f"{title or ''} {summary or ''}".lower()
-    score = 15 + source_reliability_score(source_url)
+    score, _ = calculate_risk_score_with_factors(
+        title=title,
+        summary=summary,
+        source_url=source_url,
+        countries=countries,
+        sectors=sectors,
+        watchlist_relevant=watchlist_relevant,
+    )
+    return score
 
-    cves = extract_cves(text)
-    if cves:
-        score += min(25, 10 + len(cves) * 5)
 
-    if any(term in text for term in ACTIVE_EXPLOIT_TERMS):
-        score += 20
+def calculate_confidence_score_with_factors(
+    *,
+    title: str,
+    summary: str,
+    source_url: str,
+    entities: dict[str, list[str]],
+    risk_signals: list[str],
+) -> tuple[int, list[str]]:
+    factors = ["Base confidence +30"]
+    score = 30
+    reliability = min(25, source_reliability_score(source_url))
+    if reliability:
+        score += reliability
+        factors.append(f"{source_reliability_label(source_url)} source corroboration +{reliability}")
 
-    for term, weight in CYBER_RISK_TERMS.items():
-        if term in text:
-            score += weight
+    entity_count = sum(len(values) for values in entities.values())
+    if entity_count:
+        weight = min(20, entity_count * 4)
+        score += weight
+        factors.append(f"Structured entities detected +{weight}")
 
-    if any(country in HIGH_ATTENTION_COUNTRIES for country in countries):
+    if len((title or "").split()) >= 5:
         score += 8
-    if any(sector in HIGH_IMPACT_SECTORS for sector in sectors):
+        factors.append("Specific title context +8")
+
+    if len((summary or "").split()) >= 20:
         score += 10
+        factors.append("Detailed summary +10")
+    elif summary:
+        score += 5
+        factors.append("Brief summary +5")
 
-    escalation_hits = sum(1 for term in GEOPOLITICAL_ESCALATION_TERMS if term in text)
-    score += min(20, escalation_hits * 5)
+    if risk_signals:
+        weight = min(15, len(risk_signals) * 3)
+        score += weight
+        factors.append(f"Risk signal density +{weight}")
 
-    if watchlist_relevant:
-        score += 12
-
-    if "no evidence of exploitation" in text or "no imminent threat" in text:
-        score -= 10
-
-    return clamp(score)
+    return clamp(score), factors
 
 
 def calculate_confidence_score(
@@ -125,14 +213,11 @@ def calculate_confidence_score(
     entities: dict[str, list[str]],
     risk_signals: list[str],
 ) -> int:
-    score = 30 + min(25, source_reliability_score(source_url))
-    entity_count = sum(len(values) for values in entities.values())
-    score += min(20, entity_count * 4)
-    if len((title or "").split()) >= 5:
-        score += 8
-    if len((summary or "").split()) >= 20:
-        score += 10
-    elif summary:
-        score += 5
-    score += min(15, len(risk_signals) * 3)
-    return clamp(score)
+    score, _ = calculate_confidence_score_with_factors(
+        title=title,
+        summary=summary,
+        source_url=source_url,
+        entities=entities,
+        risk_signals=risk_signals,
+    )
+    return score
