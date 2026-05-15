@@ -51,7 +51,7 @@ def test_health_endpoint_returns_required_deployment_fields() -> None:
     assert "api_key" not in payload
 
 
-def test_homepage_returns_public_demo_warnings_without_network(monkeypatch) -> None:
+def test_homepage_returns_public_landing_without_network(monkeypatch) -> None:
     async def fake_refresh_store(force: bool = False) -> dict[str, object]:
         return {"ok": True, "status": "TEST", "items": 0, "force": force}
 
@@ -60,8 +60,10 @@ def test_homepage_returns_public_demo_warnings_without_network(monkeypatch) -> N
     assert response.status_code == 200
     html = response.text
     assert "POLARIS" in html
-    assert "Demo mode: data is stored in memory and may reset." in html
-    assert "Warning: write actions are unprotected. Set POLARIS_API_KEY before public deployment." in html
+    assert "Cyber-geopolitical risk intelligence for teams without a security department." in html
+    assert "Open Live Demo" in html
+    assert "Request Pilot" in html
+    assert "Admin API key" not in html
 
 
 def test_deployment_configs_exist_and_do_not_hardcode_secrets() -> None:
@@ -95,7 +97,7 @@ def test_head_routes_and_dashboard_health(monkeypatch) -> None:
 
 
 def test_dashboard_public_demo_diagnostics_and_resilient_loading() -> None:
-    html = (ROOT / "src" / "templates" / "index.html").read_text()
+    html = (ROOT / "src" / "templates" / "dashboard.html").read_text()
     assert "Public Demo" in html
     assert "Diagnostics" in html
     assert "safeJsonFetch(url, options, fallback, label)" in html
@@ -118,7 +120,8 @@ def test_readme_mentions_live_demo_and_view_modes() -> None:
     assert "https://polaris-intel.onrender.com" in readme
     assert "Global Intelligence" in readme
     assert "Org Watchlist" in readme
-    assert "visitors can see live risk items immediately" in readme
+    assert "Public pages" in readme
+    assert "Telegram sending requires" in readme
 
 
 def test_reuters_broken_feed_removed() -> None:

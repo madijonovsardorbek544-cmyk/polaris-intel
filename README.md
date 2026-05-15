@@ -1,38 +1,45 @@
 # POLARIS Intel
 
-## Live Demo
-
 Live demo: https://polaris-intel.onrender.com
 
-The public demo opens in **Global Intelligence** mode so visitors can see live risk items immediately. **Org Watchlist** mode is for customer-specific matching after adding watchlists.
+POLARIS helps under-resourced organizations monitor cyber and geopolitical risk signals, understand what matters today, assign response work, and prove what action was taken. It is designed for schools, NGOs, logistics firms, banking and finance teams, energy organizations, telecom-adjacent companies, and small government-adjacent teams, especially in Central Asia and similar regions where dedicated security teams may be limited.
 
-POLARIS Intel is a **single-org pilot deployment product** for explainable cyber-geopolitical intelligence. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches intelligence against operator watchlists, persists alerts, and presents a FastAPI/Jinja2 dashboard for controlled pilot deployments.
+POLARIS is not a SIEM replacement, enterprise SOC automation platform, or guaranteed protection product. This version is built for public demos and controlled pilot deployments with honest limits.
 
-POLARIS is **not enterprise-grade multi-tenant SaaS yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is built for one pilot organization at a time, with honest limits and simple operator controls.
+## Public pages
 
-## What is implemented
+- `/` — public product landing page for visitors and GitHub users.
+- `/demo` — clean read-only live demo with Global Intelligence by default.
+- `/dashboard` — operator dashboard with API-key-protected write actions.
+- `/request-pilot` — public pilot request form.
+- `/health` — public deployment health check.
 
-- FastAPI application with Jinja2 dashboard.
-- `.env`-based local configuration via `python-dotenv` support when installed.
-- RSS ingestion with typed feed fetch results and explicit failed/empty feed tracking.
-- Optional PostgreSQL persistence for intelligence items, watchlists, source health, and alerts.
-- In-memory demo mode when `DATABASE_URL` is not set.
-- Entity extraction for CVEs, selected countries/blocs, sectors, and cyber terms.
-- Deterministic item classification, risk scoring, confidence scoring, and explainability factors.
+## What POLARIS is
+
+POLARIS Intel is a FastAPI + Jinja2 cyber-geopolitical risk intelligence app for pilot deployments. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches intelligence against organization watchlists, persists alerts, and provides operator workflows for ownership, notes, status, Telegram delivery, source configuration, value reporting, and exportable evidence.
+
+## Operator features
+
+- Public landing page and read-only demo separated from the full operator dashboard.
+- Dashboard **Global Intelligence** and **Org Watchlist** view modes so visitors can see live risk items immediately while operators can focus customer-specific matches.
 - Watchlists for countries, sectors, organizations, keywords, CVEs, and threat actors.
 - Tenant-ready `org_id` fields on watchlists, alerts, and watchlist matches.
 - Single-org deployment defaults through `POLARIS_DEFAULT_ORG`.
-- Dashboard **Global Intelligence** and **Org Watchlist** view modes so public demos show global items immediately while operator reads can still use one visible org filter.
 - API-key protection for write operations using `POLARIS_API_KEY` and `X-Polaris-API-Key`.
 - Optional API-key protection for read operations with `POLARIS_PROTECT_READS=true`.
-- Persistent alert workflow with `open`, `acknowledged`, and `resolved` statuses plus notes.
-- Alert preview generation, persistent alert generation, and Telegram message preview without sending.
+- Persistent alert workflow with owner, due date, severity override, notes, resolution summary, and status tracking.
 - Daily brief endpoint with top risks, affected countries/sectors, recommended actions, source failures, and empty sources.
-- Demo reset endpoint for in-memory pilot demos only.
+- Source configuration, dashboard diagnostics, CSV exports, value reports, and org scoring profiles.
+- Pilot lead capture with protected admin lead review.
+- Privacy-safe public product counters for landing page views, demo page views, and pilot submissions. No cookies, no personal tracking, and no third-party analytics.
 
-## What is still future work
+## Telegram delivery
 
-Before a real paid pilot, POLARIS still needs full multi-tenant SaaS isolation, real user login, role-based access control, billing/subscriptions, production monitoring and alerting, backups, rate limits, real Telegram sending, analyst queues, assignment workflows, escalation policies, and a stronger operational security review.
+Telegram preview works without credentials and does not send messages. Telegram sending requires both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, plus the write API key when `POLARIS_API_KEY` is configured. Tokens and chat IDs are never shown in the dashboard. Tests mock Telegram HTTP calls and do not send real messages.
+
+## What remains future
+
+Before a larger paid deployment, POLARIS still needs full multi-tenant SaaS isolation, real user login, role-based access control, billing/subscriptions, production monitoring and alerting, backups, rate limits, analyst queues, escalation policies, Alembic migrations, and a stronger operational security review.
 
 ## Project structure
 
@@ -57,6 +64,9 @@ src/
     watchlists.py
   templates/
     index.html
+    demo.html
+    dashboard.html
+    request_pilot.html
 tests/
 pytest.ini
 ```
@@ -70,7 +80,7 @@ pip install -r requirements.txt
 uvicorn src.main:app --reload
 ```
 
-Open the dashboard at <http://127.0.0.1:8000/>.
+Open the public product site at <http://127.0.0.1:8000/> or the operator dashboard at <http://127.0.0.1:8000/dashboard>.
 
 ## Configuration
 
@@ -94,8 +104,8 @@ LOG_LEVEL=INFO
 - `POLARIS_API_KEY`: optional API key. If empty, demo writes are allowed. If set, protected requests must include `X-Polaris-API-Key: <key>`.
 - `POLARIS_PROTECT_READS`: default `false`. When `true` and `POLARIS_API_KEY` is set, read endpoints require `X-Polaris-API-Key` too.
 - `POLARIS_DEFAULT_ORG`: default single-org context for the dashboard and omitted watchlist `org_id` values. Defaults to `demo`.
-- `TELEGRAM_BOT_TOKEN`: reserved for future Telegram delivery; preview formatting does not send messages.
-- `TELEGRAM_CHAT_ID`: reserved for future Telegram delivery; preview formatting does not send messages.
+- `TELEGRAM_BOT_TOKEN`: enables Telegram sending when paired with `TELEGRAM_CHAT_ID`; preview formatting works without credentials.
+- `TELEGRAM_CHAT_ID`: destination chat for Telegram sending when paired with `TELEGRAM_BOT_TOKEN`; tokens and chat IDs are never shown in the dashboard.
 - `PORT`: default HTTP port for deployment commands.
 - `DATABASE_URL`: when set, POLARIS uses PostgreSQL and creates/updates required tables at startup.
 - `MAX_ITEMS`: maximum number of intelligence items returned/stored in memory.
@@ -129,7 +139,7 @@ If `DATABASE_URL` is empty, POLARIS runs without PostgreSQL. Items, source healt
 
 Demo mode also enables:
 
-- `POST /api/demo/reset` — protected by `POLARIS_API_KEY` when configured. It clears in-memory items, watchlists, source health, and alerts for live demo resets without restarting the server.
+- `POST /api/demo/reset` — protected by `POLARIS_API_KEY` when configured. It clears in-memory items, watchlists, source health, alerts, pilot leads, and public counters for live demo resets without restarting the server.
 
 If `DATABASE_URL` is set, `POST /api/demo/reset` returns HTTP 400 with `Demo reset is disabled in database mode.`
 
@@ -141,6 +151,8 @@ If `DATABASE_URL` is set, POLARIS creates/updates these tables automatically:
 - `watchlists`
 - `source_health`
 - `alerts`
+- `pilot_leads`
+- `public_metrics`
 
 Example:
 
@@ -154,7 +166,7 @@ uvicorn src.main:app --reload
 
 ## API-key protection
 
-Write endpoints require `X-Polaris-API-Key` when `POLARIS_API_KEY` is configured:
+Protected operator endpoints require `X-Polaris-API-Key` when `POLARIS_API_KEY` is configured:
 
 - `POST /api/watchlists`
 - `PUT /api/watchlists/{id}`
@@ -164,6 +176,14 @@ Write endpoints require `X-Polaris-API-Key` when `POLARIS_API_KEY` is configured
 - `POST /api/alerts/generate`
 - `PATCH /api/alerts/{id}`
 - `POST /api/alerts/{id}/telegram-preview`
+- `POST /api/alerts/{id}/telegram-send`
+- `POST /api/source-configs`
+- `PATCH /api/source-configs/{id}`
+- `DELETE /api/source-configs/{id}`
+- `PUT /api/org-profile`
+- `GET /api/leads`
+- `PATCH /api/leads/{id}`
+- `GET /api/public-metrics`
 - `POST /api/demo/reset`
 
 Read endpoints are public by default. If `POLARIS_PROTECT_READS=true` and `POLARIS_API_KEY` is set, these read endpoints require the same header:
@@ -180,9 +200,16 @@ Read endpoints are public by default. If `POLARIS_PROTECT_READS=true` and `POLAR
 
 ### System
 
-- `GET /` — dashboard UI rendered from `src/templates/index.html`.
+- `GET /` — public landing page rendered from `src/templates/index.html`.
+- `GET /demo` — clean read-only public demo rendered from `src/templates/demo.html`.
+- `GET /dashboard` — full operator dashboard rendered from `src/templates/dashboard.html`.
+- `GET /request-pilot` — pilot request form rendered from `src/templates/request_pilot.html`.
 - `GET /health` — service health with storage mode, API-key configuration flag, read-protection flag, default org, feed count, item count, alert count, and source count.
 - `POST /api/demo/reset` — demo-memory reset. Protected by API key. Disabled in database mode.
+- `POST /api/leads` — create a pilot lead from the public form.
+- `GET /api/leads` — protected operator lead list.
+- `PATCH /api/leads/{id}` — protected lead status update.
+- `GET /api/public-metrics` — protected privacy-safe public product counters.
 
 ### Intelligence
 
@@ -237,7 +264,7 @@ Example watchlist payload:
 - `PATCH /api/alerts/{id}` — update alert `status` and/or `notes`.
 - `POST /api/alerts/{id}/telegram-preview` — return the Telegram-formatted alert message without sending anything.
 
-The dashboard can generate persistent alerts, filter persisted/preview alerts, search title/reason/watchlist text, edit alert notes/status, and preview Telegram formatting. It does **not** send Telegram messages.
+The operator dashboard can generate persistent alerts, filter persisted/preview alerts, search title/reason/watchlist text, edit alert ownership/status/notes, preview Telegram formatting, and send Telegram messages when credentials are configured.
 
 ### Daily brief
 

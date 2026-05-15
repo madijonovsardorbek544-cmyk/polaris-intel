@@ -3,686 +3,94 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ app_name }}</title>
+    <title>{{ app_name }} | Public product</title>
     <style>
-      :root { color-scheme: dark; --bg:#060b16; --panel:rgba(255,255,255,.06); --panel2:rgba(255,255,255,.09); --line:rgba(255,255,255,.13); --text:rgba(255,255,255,.94); --muted:rgba(255,255,255,.68); --accent:#8ab4ff; --critical:#ff5f6d; --high:#ff9f68; --ok:#7ae582; }
-      * { box-sizing: border-box; }
-      body { margin:0; min-height:100vh; font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--text); background:radial-gradient(900px 520px at 20% -10%, rgba(63,112,218,.35), transparent 60%), linear-gradient(180deg,#050913,#08111f 58%,#050913); }
-      a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
-      .shell { width:min(1440px, calc(100% - 32px)); margin:0 auto; padding:28px 0 48px; }
-      .hero { display:grid; grid-template-columns:1fr auto; gap:16px; align-items:end; margin-bottom:18px; }
-      h1 { margin:0; font-size:clamp(34px, 7vw, 76px); letter-spacing:-.045em; line-height:.94; }
-      h2 { margin:0 0 12px; font-size:18px; }
-      h3 { margin:0; font-size:17px; }
-      .subtitle { color:var(--muted); max-width:840px; margin-top:10px; line-height:1.55; }
-      .status, .panel, .card { border:1px solid var(--line); background:var(--panel); border-radius:18px; box-shadow:0 12px 44px rgba(0,0,0,.18); }
-      .status { padding:14px 16px; color:var(--muted); min-width:240px; }
-      .layout { display:grid; grid-template-columns: minmax(0, 1fr) 390px; gap:14px; align-items:start; }
-      .toolbar, .form-grid { display:grid; gap:10px; }
-      .toolbar { grid-template-columns:1.4fr repeat(4, minmax(120px,.5fr)) auto; margin:18px 0; }
-      .form-grid { grid-template-columns:1fr 1fr; }
-      input, textarea, select, button { border:1px solid var(--line); border-radius:14px; padding:12px 13px; color:var(--text); background:rgba(255,255,255,.055); outline:none; width:100%; }
-      textarea { min-height:72px; resize:vertical; font-family:inherit; }
-      button { cursor:pointer; font-weight:800; background:rgba(138,180,255,.14); border-color:rgba(138,180,255,.28); }
-      button:hover { background:rgba(138,180,255,.22); } button:disabled { opacity:.65; cursor:wait; }
-      .danger { background:rgba(255,95,109,.12); border-color:rgba(255,95,109,.35); }
-      .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:16px 0 20px; }
-      .stat { padding:16px; border:1px solid var(--line); background:var(--panel); border-radius:18px; }
-      .stat strong { display:block; font-size:30px; letter-spacing:-.03em; } .stat span, .muted { color:var(--muted); font-size:13px; }
-      .cards, .list { display:grid; gap:12px; }
-      .card { padding:18px; }
-      .meta { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0; }
-      .pill, .chip, .badge { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; padding:5px 9px; font-size:12px; color:var(--muted); background:rgba(255,255,255,.055); }
-      .risk-Critical { color:white; background:rgba(255,95,109,.22); border-color:rgba(255,95,109,.45); }
-      .risk-High { color:white; background:rgba(255,159,104,.20); border-color:rgba(255,159,104,.45); }
-      .risk-Medium { color:white; background:rgba(255,209,102,.16); border-color:rgba(255,209,102,.40); }
-      .risk-Low { color:white; background:rgba(142,202,230,.16); border-color:rgba(142,202,230,.35); }
-      .status-open { color:#fff; border-color:rgba(255,159,104,.45); background:rgba(255,159,104,.16); }
-      .status-acknowledged { color:#fff; border-color:rgba(138,180,255,.45); background:rgba(138,180,255,.16); }
-      .status-resolved { color:#fff; border-color:rgba(122,229,130,.45); background:rgba(122,229,130,.14); }
-      .summary { color:var(--muted); line-height:1.55; }
-      .section { margin-top:12px; }
-      .factor-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
-      .badge.watch { color:#d7f8ff; border-color:rgba(138,180,255,.45); background:rgba(138,180,255,.15); }
-      .sidebar { display:grid; gap:14px; position:sticky; top:16px; }
-      .panel { padding:16px; }
-      .mini { padding:10px; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,.04); }
-      .mini strong { display:block; font-size:13px; margin-bottom:4px; }
-      .err { color:var(--critical); } .ok { color:var(--ok); }
-      .notice { min-height:18px; margin-top:8px; font-size:13px; }
-      .deployment-banners { display:grid; gap:10px; margin:0 0 16px; }
-      .demo-panel { margin:0 0 16px; padding:18px; }
-      .demo-metrics, .diagnostic-links, .mode-toggle, .demo-buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
-      .mode-toggle button { width:auto; min-width:180px; }
-      .mode-toggle button.active { background:rgba(122,229,130,.18); border-color:rgba(122,229,130,.45); color:#fff; }
-      .empty-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
-      .empty-actions button { width:auto; }
-      .status-details { margin-top:8px; display:grid; gap:4px; }
-      .banner { border:1px solid var(--line); border-radius:14px; padding:11px 14px; font-size:14px; background:rgba(138,180,255,.12); color:var(--text); }
-      .banner.warning { border-color:rgba(255,159,104,.45); background:rgba(255,159,104,.14); }
-      @media (max-width: 1050px) { .layout, .hero { grid-template-columns:1fr; } .sidebar { position:static; } .toolbar { grid-template-columns:1fr 1fr; } .stats { grid-template-columns:1fr 1fr; } }
-      @media (max-width: 640px) { .toolbar, .stats, .form-grid { grid-template-columns:1fr; } }
+      :root { color-scheme: dark; --bg:#06101f; --panel:rgba(255,255,255,.075); --line:rgba(255,255,255,.14); --text:rgba(255,255,255,.94); --muted:rgba(255,255,255,.68); --accent:#8ab4ff; --ok:#7ae582; --warn:#ffcf7a; }
+      * { box-sizing:border-box; } body { margin:0; font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--text); background:radial-gradient(900px 520px at 15% -10%, rgba(82,132,255,.34), transparent 62%), linear-gradient(180deg,#050913,#0a1424 58%,#050913); }
+      a { color:inherit; text-decoration:none; } p { color:var(--muted); line-height:1.65; } .shell { width:min(1180px, calc(100% - 32px)); margin:0 auto; padding:28px 0 64px; }
+      nav { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:70px; } .brand { font-weight:900; letter-spacing:.08em; } .navlinks { display:flex; gap:10px; flex-wrap:wrap; } .navlinks a, .button { border:1px solid var(--line); border-radius:999px; padding:11px 15px; background:rgba(255,255,255,.06); font-weight:800; }
+      .hero { max-width:940px; padding:28px 0 54px; } h1 { font-size:clamp(44px, 8vw, 86px); line-height:.94; letter-spacing:-.055em; margin:0 0 18px; } h2 { font-size:clamp(26px, 4vw, 42px); letter-spacing:-.035em; margin:0 0 12px; } h3 { margin:0 0 8px; } .subtitle { font-size:clamp(18px, 2vw, 24px); max-width:820px; }
+      .actions { display:flex; gap:12px; flex-wrap:wrap; margin-top:28px; } .primary { background:linear-gradient(135deg,#8ab4ff,#7ae582); color:#05101e; border:0; } .secondary { color:var(--accent); }
+      .grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; } .grid.three { grid-template-columns:repeat(3,minmax(0,1fr)); } .panel, .card { border:1px solid var(--line); background:var(--panel); border-radius:24px; padding:22px; box-shadow:0 18px 54px rgba(0,0,0,.2); } section { margin-top:34px; } .metric strong { display:block; font-size:34px; letter-spacing:-.04em; } .metric span, .muted { color:var(--muted); } .limits li { margin:10px 0; color:var(--muted); line-height:1.5; } .pill { display:inline-flex; border:1px solid rgba(122,229,130,.35); color:var(--ok); border-radius:999px; padding:7px 11px; background:rgba(122,229,130,.1); font-size:13px; font-weight:800; }
+      @media (max-width:900px) { .grid, .grid.three { grid-template-columns:1fr 1fr; } nav { align-items:flex-start; flex-direction:column; margin-bottom:36px; } }
+      @media (max-width:620px) { .grid, .grid.three { grid-template-columns:1fr; } .actions a { width:100%; text-align:center; } }
     </style>
   </head>
   <body>
     <main class="shell">
-      <header class="hero">
-        <div>
-          <h1>{{ app_name }}</h1>
-          <p class="subtitle">Real pilot customer workflow product for explainable cyber-geopolitical intelligence. Tracks RSS sources, watchlist matches, risk drivers, persistent alert workflow, and a daily brief.</p>
-        </div>
-        <div class="status"><div id="status">Status: {{ status }} · Global Intelligence · {{ items_count }} items</div><div id="statusDetails" class="status-details muted"></div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div><div class="muted">Current mode: <strong id="statusMode">Global Intelligence</strong></div></div>
-      </header>
+      <nav>
+        <a class="brand" href="/">POLARIS INTEL</a>
+        <div class="navlinks"><a href="/demo">Live Demo</a><a href="/request-pilot">Request Pilot</a><a href="/dashboard">Operator Dashboard</a></div>
+      </nav>
 
-      {% if demo_mode or not api_key_configured %}
-      <section class="deployment-banners" aria-label="Deployment status">
-        {% if demo_mode %}
-        <div class="banner">Demo mode: data is stored in memory and may reset.</div>
-        {% endif %}
-        {% if not api_key_configured %}
-        <div class="banner warning">Warning: write actions are unprotected. Set POLARIS_API_KEY before public deployment.</div>
-        {% endif %}
-      </section>
-      {% endif %}
-
-      <section class="panel demo-panel" aria-label="Public Demo">
-        <h2>POLARIS Public Demo</h2>
-        <p class="summary">Explore global cyber and geopolitical risk signals. Switch to Org Watchlist mode to see customer-specific matching after adding watchlists.</p>
-        <div class="mode-toggle" role="group" aria-label="Dashboard view mode">
-          <button id="globalMode" type="button" data-view-mode="global">Global Intelligence</button>
-          <button id="orgMode" type="button" data-view-mode="org">Org Watchlist</button>
+      <section class="hero">
+        <span class="pill">Built for under-resourced risk teams</span>
+        <h1>Cyber-geopolitical risk intelligence for teams without a security department.</h1>
+        <p class="subtitle">POLARIS monitors cyber and geopolitical signals, explains what matters, and helps teams turn alerts into action.</p>
+        <div class="actions">
+          <a class="button primary" href="/demo">Open Live Demo</a>
+          <a class="button secondary" href="/request-pilot">Request Pilot</a>
+          <a class="button" href="/dashboard">View Operator Dashboard</a>
         </div>
-        <div class="demo-metrics">
-          <span class="chip"><strong id="demoItems">{{ items_count }}</strong>&nbsp;global items monitored</span>
-          <span class="chip">Active org: <strong id="demoActiveOrg">{{ default_org }}</strong></span>
-          <span class="chip">Current mode: <strong id="demoMode">Global Intelligence</strong></span>
-          <span class="chip"><strong id="demoSources">—</strong>&nbsp;sources checked</span>
-          <span class="chip">Last refresh: <strong id="demoLastStatus">{{ status }}</strong></span>
-          <span class="chip"><strong id="demoHighCount">—</strong>&nbsp;high/critical global</span>
-          <span class="chip" id="demoOrgItemsChip" style="display:none"><strong id="demoOrgItems">—</strong>&nbsp;org-specific items</span>
-        </div>
-        <div class="section">
-          <h3>Try these demo watchlists</h3>
-          <p class="muted">Load a sample into the form below, then add an API key if you want to save it.</p>
-          <div class="demo-buttons">
-            <button type="button" data-demo-template="school">School cyber risk</button>
-            <button type="button" data-demo-template="energy">Energy infrastructure</button>
-            <button type="button" data-demo-template="bank">Bank/finance risk</button>
-          </div>
-        </div>
-        <p class="muted section">Read-only public demo. Operator actions require an API key.</p>
       </section>
 
-      <section class="stats">
-        <div class="stat"><strong id="totalItems">—</strong><span>Items</span></div>
-        <div class="stat"><strong id="avgRisk">—</strong><span>Avg risk</span></div>
-        <div class="stat"><strong id="highCount">—</strong><span>Critical/High</span></div>
-        <div class="stat"><strong id="alertCount">—</strong><span>Persisted alerts</span></div>
+      <section class="panel">
+        <h2>The problem</h2>
+        <p>Small organizations are expected to watch cyber threats, CVEs, ransomware campaigns, geopolitical disruptions, source failures, and sector risk every day. Most do not have analysts, threat intelligence platforms, or spare time to separate signal from noise.</p>
+        <p>They need a simple way to see what matters today, decide who owns the response, and prove what action was taken.</p>
       </section>
 
-      <div class="toolbar">
-        <input id="q" placeholder="Search title, summary, tags" />
-        <select id="risk"><option value="">All risk</option></select>
-        <select id="category"><option value="">All categories</option></select>
-        <select id="country"><option value="">All countries</option></select>
-        <select id="sector"><option value="">All sectors</option></select>
-        <button id="refresh">Refresh</button>
-      </div>
+      <section>
+        <h2>What POLARIS does</h2>
+        <div class="grid">
+          <div class="card"><h3>Monitors risk signals</h3><p>Tracks cyber and geopolitical sources relevant to exposed teams and regions.</p></div>
+          <div class="card"><h3>Scores and explains risk</h3><p>Highlights severity, confidence, why it matters, and recommended next action.</p></div>
+          <div class="card"><h3>Matches watchlists</h3><p>Connects alerts to countries, sectors, organizations, CVEs, keywords, and threat actors.</p></div>
+          <div class="card"><h3>Tracks response</h3><p>Records owners, notes, status, resolution history, and value reports.</p></div>
+        </div>
+      </section>
 
-      <div class="layout">
-        <section class="cards" id="cards"></section>
-        <aside class="sidebar">
-          <section class="panel">
-            <h2>Org context</h2>
-            <label class="muted" for="activeOrg">Active org_id</label>
-            <input id="activeOrg" value="{{ default_org }}" placeholder="Active org_id" />
-            <p class="muted">Stored in sessionStorage. Dashboard reads use this org_id.</p>
-          </section>
-          <section class="panel">
-            <h2>Diagnostics</h2>
-            <div id="diagnostics" class="diagnostic-links"></div>
-          </section>
-          <section class="panel">
-            <h2>Admin API key</h2>
-            <input id="adminKey" type="password" autocomplete="off" placeholder="X-Polaris-API-Key for write actions" />
-            <p class="muted">Stored only in sessionStorage for this browser tab. Leave empty only when demo writes are unprotected.</p>
-            <div id="authNotice" class="notice"></div>
-          </section>
-          <section class="panel">
-            <h2>Daily brief</h2>
-            <p id="briefHeadline" class="summary">Loading brief…</p>
-            <div id="briefActions" class="factor-list"></div>
-          </section>
-          <section class="panel">
-            <h2>Watchlists</h2>
-            <div class="form-grid">
-              <input id="wlName" placeholder="Name" />
-              <input id="wlOrg" placeholder="org_id" value="{{ default_org }}" />
-              <input id="wlCountries" placeholder="Countries, comma-separated" />
-              <input id="wlSectors" placeholder="Sectors, comma-separated" />
-              <input id="wlKeywords" placeholder="Keywords, comma-separated" />
-              <input id="wlCves" placeholder="CVEs, comma-separated" />
-              <input id="wlActors" placeholder="Threat actors, comma-separated" />
-              <select id="templateSelect"><option value="">Create from template</option><option value="school">School</option><option value="NGO">NGO</option><option value="logistics">Logistics</option><option value="bank">Bank</option><option value="energy">Energy</option><option value="telecom">Telecom</option><option value="government">Government</option></select>
-              <button id="createWatchlist">Create</button>
-            </div>
-            <div id="watchlistNotice" class="notice"></div>
-            <div id="watchlists" class="list section"></div>
-          </section>
-          <section class="panel">
-            <h2>Alerts</h2>
-            <button id="generateAlerts">Generate persistent alerts</button>
-            <div id="alertNotice" class="notice"></div>
-            <div class="form-grid section">
-              <select id="alertStatus"><option value="all">All statuses</option><option value="open">Open</option><option value="acknowledged">Acknowledged</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="false_positive">False positive</option></select>
-              <select id="alertType"><option value="all">All alert types</option><option value="persisted">Persisted</option><option value="preview">Preview</option></select>
-              <input id="alertSearch" placeholder="Search alerts" />
-            </div>
-            <div id="telegramPreviewPanel" class="section" style="display:none">
-              <label class="muted" for="telegramPreviewText">Telegram preview only — no message sent</label>
-              <textarea id="telegramPreviewText" readonly></textarea>
-            </div>
-            <div id="alerts" class="list"></div>
-          </section>
-          <section class="panel">
-            <h2>Value report</h2>
-            <div id="valueReport" class="list">Loading value report…</div>
-            <div class="form-grid section"><button id="exportAlerts">Export alerts CSV</button><button id="exportValue">Export value report CSV</button></div>
-          </section>
-          <section class="panel">
-            <h2>Source config</h2>
-            <div class="form-grid">
-              <input id="sourceUrl" placeholder="Source URL" />
-              <input id="sourceLabel" placeholder="Source label" />
-              <select id="sourceCategory"><option value="cyber">Cyber</option><option value="geopolitical">Geopolitical</option><option value="local">Local</option><option value="custom" selected>Custom</option></select>
-              <button id="createSource">Add source</button>
-            </div>
-            <div id="sourceConfigNotice" class="notice"></div>
-            <div id="sourceConfigs" class="list section"></div>
-          </section>
-          <section class="panel">
-            <h2>Source health</h2>
-            <div id="sources" class="list"></div>
-          </section>
-        </aside>
-      </div>
+      <section>
+        <h2>Who it is for</h2>
+        <div class="grid three">
+          <div class="card">Schools</div><div class="card">NGOs</div><div class="card">Logistics firms</div><div class="card">Banking and finance teams</div><div class="card">Energy organizations</div><div class="card">Telecom and government-adjacent teams</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Live demo preview</h2>
+        <div class="grid" id="demoMetrics">
+          <div class="metric"><strong id="globalItems">{{ items_count }}</strong><span>global items</span></div>
+          <div class="metric"><strong id="sources">—</strong><span>sources</span></div>
+          <div class="metric"><strong id="highCritical">—</strong><span>high/critical items</span></div>
+          <div class="metric"><strong id="lastRefresh">{{ status }}</strong><span>last refresh status</span></div>
+        </div>
+      </section>
+
+      <section class="panel" id="pilot">
+        <h2>Looking for 3–5 pilot organizations to test POLARIS with real watchlists and daily risk briefings.</h2>
+        <p>Early pilots are best for teams in Central Asia and similar under-resourced regions that need clear operational risk awareness without buying an enterprise SOC stack.</p>
+        <div class="actions"><a class="button primary" href="/request-pilot">Request a pilot</a></div>
+      </section>
+
+      <section class="panel">
+        <h2>Honest limits</h2>
+        <ul class="limits">
+          <li>Not a SIEM replacement.</li>
+          <li>Not enterprise SOC automation yet.</li>
+          <li>Built for pilot deployments and learning with real users.</li>
+          <li>No fake AI claims: POLARIS focuses on explainable monitoring, matching, workflow, and reporting.</li>
+        </ul>
+      </section>
     </main>
-
     <script>
-      const $ = (id) => document.getElementById(id);
-      const initialItemsCount = {{ items_count }};
-      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {} };
-      const controls = ["q", "risk", "category", "country", "sector"].map($);
-      const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
-      const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
-      const opt = (value) => { const o = document.createElement("option"); o.value = value; o.textContent = value; return o; };
-      const chip = (text, cls = "chip") => { const el = document.createElement("span"); el.className = cls; el.textContent = text; return el; };
-      const csv = (value) => value.split(",").map(v => v.trim()).filter(Boolean);
-      function safeHttpUrl(value) { try { const url = new URL(value || ""); return ["http:", "https:"].includes(url.protocol) ? url.href : null; } catch (_) { return null; } }
-      function adminHeaders() { const key = sessionStorage.getItem("polarisAdminApiKey") || ""; return key ? { "X-Polaris-API-Key": key } : {}; }
-      function activeOrg() { return (sessionStorage.getItem("polarisActiveOrg") || state.activeOrg || "{{ default_org }}").trim() || "{{ default_org }}"; }
-      function orgQuery() { return `org_id=${encodeURIComponent(activeOrg())}`; }
-      function currentViewMode() { const saved = sessionStorage.getItem("polarisViewMode"); return saved === "org" ? "org" : "global"; }
-      function modeLabel() { return state.viewMode === "org" ? "Org Watchlist" : "Global Intelligence"; }
-      function scopedUrl(base) { return state.viewMode === "org" ? `${base}?${orgQuery()}` : base; }
-      function valueReportUrl() { return state.viewMode === "org" ? `/api/reports/value?${orgQuery()}&days=7` : "/api/reports/value?days=7"; }
-      function exportUrl(base) { return state.viewMode === "org" ? `${base}?${orgQuery()}` : base; }
-      function setNotice(id, message, ok = false) { const el = $(id); el.textContent = message || ""; el.className = `notice ${message ? (ok ? "ok" : "err") : ""}`; }
-      $("adminKey").value = sessionStorage.getItem("polarisAdminApiKey") || "";
-      $("adminKey").addEventListener("input", (event) => { sessionStorage.setItem("polarisAdminApiKey", event.target.value); setNotice("authNotice", event.target.value ? "Admin API key saved for this tab." : "", true); });
-      $("activeOrg").value = activeOrg();
-      $("activeOrgLabel").textContent = activeOrg();
-      $("wlOrg").value = activeOrg();
-      $("activeOrg").addEventListener("change", async (event) => { const next = event.target.value.trim() || "{{ default_org }}"; sessionStorage.setItem("polarisActiveOrg", next); state.activeOrg = next; $("activeOrgLabel").textContent = next; $("wlOrg").value = next; await load(); });
-      function setViewMode(mode, reload = true) {
-        state.viewMode = mode === "org" ? "org" : "global";
-        sessionStorage.setItem("polarisViewMode", state.viewMode);
-        $("globalMode").classList.toggle("active", state.viewMode === "global");
-        $("orgMode").classList.toggle("active", state.viewMode === "org");
-        $("statusMode").textContent = modeLabel();
-        $("demoMode").textContent = modeLabel();
-        if (reload) load();
-      }
-      setViewMode(currentViewMode(), false);
-
-      function hydrateFilters() {
-        const risks = uniq(state.items.map(i => i.risk_level));
-        const categories = uniq(state.items.map(i => i.category));
-        const countries = uniq(state.items.flatMap(i => i.affected_countries || []));
-        const sectors = uniq(state.items.flatMap(i => i.affected_sectors || []));
-        [["risk", risks], ["category", categories], ["country", countries], ["sector", sectors]].forEach(([id, values]) => {
-          const current = $(id).value; $(id).replaceChildren(opt(""), ...values.map(opt));
-          $(id).firstChild.textContent = id === "risk" ? "All risk" : id === "category" ? "All categories" : id === "country" ? "All countries" : "All sectors";
-          $(id).value = current;
-        });
-      }
-
-      function renderStats() {
-        const byRisk = state.items.reduce((acc, item) => { acc[item.risk_level] = (acc[item.risk_level] || 0) + 1; return acc; }, {});
-        const avg = state.items.length ? (state.items.reduce((sum, item) => sum + (item.risk_score || 0), 0) / state.items.length).toFixed(1) : "0";
-        $("totalItems").textContent = state.items.length;
-        $("avgRisk").textContent = avg;
-        $("highCount").textContent = (byRisk.Critical || 0) + (byRisk.High || 0);
-        $("alertCount").textContent = state.alerts.total_persisted ?? (state.alerts.persisted || []).length;
-      }
-
-      function emptyCard(message) {
-        const card = document.createElement("article"); card.className = "card";
-        const text = document.createElement("p"); text.className = "summary"; text.textContent = message;
-        card.append(text); return card;
-      }
-
-      function orgEmptyStateCard(hasFilters) {
-        const card = document.createElement("article"); card.className = "card";
-        const title = document.createElement("h2"); title.textContent = hasFilters ? "No items match the current filters." : "No org-specific matches yet.";
-        const summary = document.createElement("p"); summary.className = "summary";
-        summary.textContent = hasFilters ? "Clear filters or switch back to Global Intelligence to inspect all current signals." : "POLARIS has global intelligence data, but no items match the active org watchlists yet.";
-        const watchlistHint = document.createElement("p"); watchlistHint.className = "muted";
-        watchlistHint.textContent = state.publicStats.org_watchlists ? "Tune watchlist criteria or review global items for relevant keywords." : "No watchlists for this org yet. Add one to make intelligence customer-specific.";
-        const actions = document.createElement("div"); actions.className = "empty-actions";
-        const add = document.createElement("button"); add.type = "button"; add.textContent = "Add a watchlist"; add.addEventListener("click", () => $("wlName").focus());
-        const template = document.createElement("button"); template.type = "button"; template.textContent = "Use an onboarding template"; template.addEventListener("click", () => $("templateSelect").focus());
-        const global = document.createElement("button"); global.type = "button"; global.textContent = "Switch to Global Intelligence"; global.addEventListener("click", () => setViewMode("global"));
-        actions.append(add, template, global);
-        card.append(title, summary, watchlistHint, actions); return card;
-      }
-
-      function renderCards(items) {
-        if (!items.length) {
-          const hasGlobalItems = (state.publicStats.global_items || initialItemsCount) > 0;
-          const hasFilters = ["q", "risk", "category", "country", "sector"].some(id => $(id).value);
-          if (state.viewMode === "org" && hasGlobalItems) {
-            $("cards").replaceChildren(orgEmptyStateCard(hasFilters));
-            return;
-          }
-          const message = hasFilters ? "No items match the current filters." : "No intelligence items available yet.";
-          $("cards").replaceChildren(emptyCard(message));
-          return;
-        }
-        const cards = items.map(item => {
-          const card = document.createElement("article"); card.className = "card";
-          const title = document.createElement("h3"); const safeUrl = safeHttpUrl(item.source_url);
-          if (safeUrl) { const link = document.createElement("a"); link.href = safeUrl; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = item.title; title.append(link); }
-          else { title.textContent = item.title || "Untitled item"; }
-          card.append(title);
-          const meta = document.createElement("div"); meta.className = "meta";
-          meta.append(chip(item.risk_level, `pill risk-${item.risk_level}`), chip(`Risk ${item.risk_score}`), chip(`Confidence ${item.confidence_score}`), chip(item.category), chip(item.source_domain || "source"));
-          (item.watchlist_matches || []).slice(0, 3).forEach(m => meta.append(chip(`Watchlist: ${m.watchlist_name} · ${m.matched_value}`, "badge watch")));
-          card.append(meta);
-          const summary = document.createElement("p"); summary.className = "summary"; summary.textContent = item.summary || "No summary available."; card.append(summary);
-          const fl = document.createElement("div"); fl.className = "factor-list"; (item.risk_factors || []).slice(0, 8).forEach(f => fl.append(chip(f))); card.append(fl);
-          if ((item.watchlist_matches || []).length) { const wl = document.createElement("div"); wl.className = "section summary"; wl.textContent = item.watchlist_matches.map(m => m.reason).join(" · "); card.append(wl); }
-          return card;
-        });
-        $("cards").replaceChildren(...cards);
-      }
-
-      function editInput(value, placeholder) {
-        const input = document.createElement("input"); input.value = (value || []).join(", "); input.placeholder = placeholder; return input;
-      }
-
-      function renderWatchlistEdit(el, wl) {
-        const name = document.createElement("input"); name.value = wl.name || ""; name.placeholder = "Name";
-        const org = document.createElement("input"); org.value = wl.org_id || activeOrg(); org.placeholder = "org_id";
-        const countries = editInput(wl.countries, "Countries, comma-separated");
-        const sectors = editInput(wl.sectors, "Sectors, comma-separated");
-        const keywords = editInput(wl.keywords, "Keywords, comma-separated");
-        const cves = editInput(wl.cves, "CVEs, comma-separated");
-        const actors = editInput(wl.threat_actors, "Threat actors, comma-separated");
-        const save = document.createElement("button"); save.textContent = "Save watchlist"; save.addEventListener("click", () => updateWatchlist(wl.id, { name: name.value.trim(), org_id: org.value.trim() || wl.org_id || activeOrg(), countries: csv(countries.value), sectors: csv(sectors.value), organizations: wl.organizations || [], keywords: csv(keywords.value), cves: csv(cves.value), threat_actors: csv(actors.value) }));
-        const cancel = document.createElement("button"); cancel.textContent = "Cancel edit"; cancel.addEventListener("click", renderWatchlists);
-        const grid = document.createElement("div"); grid.className = "form-grid section"; grid.append(name, org, countries, sectors, keywords, cves, actors, save, cancel);
-        el.replaceChildren(grid);
-      }
-
-      function renderWatchlists() {
-        $("watchlists").replaceChildren(...(state.watchlists.length ? state.watchlists.map(wl => {
-          const el = document.createElement("div"); el.className = "mini";
-          const strong = document.createElement("strong"); strong.textContent = `${wl.name} · ${wl.org_id}`;
-          const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = [...(wl.countries || []), ...(wl.sectors || []), ...(wl.keywords || []), ...(wl.cves || []), ...(wl.threat_actors || [])].join(", ") || "No criteria";
-          const edit = document.createElement("button"); edit.className = "section"; edit.textContent = "Edit"; edit.setAttribute("data-watchlist-edit", wl.id); edit.addEventListener("click", () => renderWatchlistEdit(el, wl));
-          const del = document.createElement("button"); del.className = "danger section"; del.textContent = "Delete"; del.addEventListener("click", () => deleteWatchlist(wl.id));
-          const actions = document.createElement("div"); actions.className = "form-grid"; actions.append(edit, del);
-          el.append(strong, muted, actions); return el;
-        }) : [chip("No watchlists for this org yet. Add one to make intelligence customer-specific.")]));
-      }
-
-      function alertText(alert) { return `${alert.title || ""} ${alert.reason || ""} ${alert.matched_watchlist_name || alert.matched_watchlist || ""}`.toLowerCase(); }
-      function alertMatchesFilters(alert, kind) {
-        const status = $("alertStatus").value;
-        const type = $("alertType").value;
-        const q = $("alertSearch").value.toLowerCase().trim();
-        return (type === "all" || type === kind) && (kind === "preview" || status === "all" || (alert.status || "open") === status) && (!q || alertText(alert).includes(q));
-      }
-      function previewCard(alert) {
-        const el = document.createElement("div"); el.className = "mini";
-        const label = chip("Preview — not persisted", "badge watch");
-        const strong = document.createElement("strong"); strong.textContent = `${alert.risk_level}: ${alert.title || "Untitled alert"}`;
-        const wl = document.createElement("div"); wl.className = "muted"; wl.textContent = `Matched watchlist: ${alert.matched_watchlist_name || alert.matched_watchlist || "Unknown"}`;
-        const reason = document.createElement("div"); reason.className = "muted"; reason.textContent = `Reason: ${alert.reason || "No reason provided"}`;
-        const action = document.createElement("div"); action.className = "muted"; action.textContent = `Recommended action: ${alert.recommended_action || "Review."}`;
-        const hint = document.createElement("div"); hint.className = "muted section"; hint.textContent = "Click Generate persistent alerts to persist this preview.";
-        el.append(label, strong, wl, reason, action, hint); return el;
-      }
-
-      function renderAlerts() {
-        const persisted = (state.alerts.persisted || []).filter(alert => alertMatchesFilters(alert, "persisted"));
-        const previews = (state.alerts.generated_preview || []).filter(alert => alertMatchesFilters(alert, "preview"));
-        const nodes = [];
-        persisted.slice(0, 8).forEach(alert => {
-          const el = document.createElement("div"); el.className = "mini";
-          const strong = document.createElement("strong"); strong.textContent = `${alert.risk_level}: ${alert.matched_watchlist_name || alert.matched_watchlist}`;
-          const status = chip(alert.status || "open", `badge status-${alert.status || "open"}`);
-          const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = `${alert.title} — ${alert.reason}`;
-          const owner = document.createElement("input"); owner.placeholder = "Owner"; owner.value = alert.owner || "";
-          const due = document.createElement("input"); due.placeholder = "Due date"; due.type = "date"; due.value = (alert.due_at || "").slice(0, 10);
-          const statusSelect = document.createElement("select"); ["open", "acknowledged", "in_progress", "resolved", "false_positive"].forEach(v => { const o = opt(v); o.textContent = v.replace("_", " "); statusSelect.append(o); }); statusSelect.value = alert.status || "open";
-          const severity = document.createElement("select"); ["", "Critical", "High", "Medium", "Low"].forEach(v => { const o = opt(v); o.textContent = v || "Severity override"; severity.append(o); }); severity.value = alert.severity_override || "";
-          const notes = document.createElement("textarea"); notes.placeholder = "Alert notes"; notes.value = alert.notes || "";
-          const resolution = document.createElement("textarea"); resolution.placeholder = "Resolution summary"; resolution.value = alert.resolution_summary || "";
-          const save = document.createElement("button"); save.textContent = "Save alert"; save.addEventListener("click", () => patchAlert(alert.id, { status: statusSelect.value, notes: notes.value, owner: owner.value, due_at: due.value, severity_override: severity.value || null, resolution_summary: resolution.value }));
-          const telegram = document.createElement("button"); telegram.textContent = "Telegram preview"; telegram.setAttribute("data-telegram-preview", alert.id); telegram.addEventListener("click", () => telegramPreview(alert.id));
-          const sendTelegram = document.createElement("button"); sendTelegram.textContent = "Send Telegram"; sendTelegram.addEventListener("click", () => telegramSend(alert.id));
-          const events = document.createElement("div"); events.className = "muted section"; events.textContent = `Events: ${(alert.events || []).map(e => e.event_type).join(", ") || "No recent events"}`;
-          const fields = document.createElement("div"); fields.className = "form-grid section"; fields.append(owner, due, statusSelect, severity, notes, resolution);
-          const actions = document.createElement("div"); actions.className = "form-grid section"; actions.append(save, telegram, sendTelegram);
-          el.append(strong, status, muted, fields, actions, events); nodes.push(el);
-        });
-        if (previews.length) {
-          nodes.push(chip(`${previews.length} generated alert previews. Click Generate persistent alerts to persist them.`));
-          previews.slice(0, 8).forEach(alert => nodes.push(previewCard(alert)));
-        }
-        if (!nodes.length) nodes.push(chip("No alerts yet. Add a watchlist, then generate persistent alerts."));
-        $("alerts").replaceChildren(...nodes);
-      }
-
-      function renderSidebars() {
-        $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
-        $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
-        renderWatchlists(); renderAlerts(); renderValueReport(); renderSourceConfigs();
-        if (state.panelErrors.onboarding) setNotice("watchlistNotice", state.panelErrors.onboarding);
-        if (!state.panelErrors.sourceConfigs && !state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
-        $("sources").replaceChildren(...(state.sources.length ? state.sources.slice(0, 8).map(src => {
-          const el = document.createElement("div"); el.className = "mini";
-          const statusClass = src.status === "failing" ? "err" : (src.status === "healthy" ? "ok" : "muted");
-          const strong = document.createElement("strong"); strong.className = statusClass; strong.textContent = (src.status || "pending").toUpperCase();
-          const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = `${src.source_url} · current failures ${src.consecutive_failure_count || 0} · total failures ${src.total_failure_count || 0} · empty ${src.empty_count || 0}${src.last_error ? ` · ${src.last_error}` : ""}`;
-          el.append(strong, muted); return el;
-        }) : [chip("No source health yet — Action: Add source")]));
-      }
-
-      function renderValueReport() {
-        if (state.panelErrors.valueReport) {
-          $("valueReport").replaceChildren(chip(state.panelErrors.valueReport, "chip err"));
-          return;
-        }
-        const r = state.valueReport || {};
-        $("valueReport").replaceChildren(
-          chip(`${r.total_items_monitored || 0} items monitored`), chip(`${r.total_alerts || 0} alerts`), chip(`${r.unresolved_alerts || 0} unresolved`),
-          ...((r.recommended_next_actions || []).map(a => chip(a)))
-        );
-      }
-
-      function renderSourceConfigs() {
-        if (state.panelErrors.sourceConfigs) {
-          $("sourceConfigs").replaceChildren(chip(state.panelErrors.sourceConfigs, "chip err"));
-          return;
-        }
-        $("sourceConfigs").replaceChildren(...(state.sourceConfigs.length ? state.sourceConfigs.map(src => {
-          const el = document.createElement("div"); el.className = "mini";
-          const strong = document.createElement("strong"); strong.textContent = `${src.enabled ? "Enabled" : "Disabled"}: ${src.label}`;
-          const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = `${src.category} · ${src.url}`;
-          const toggle = document.createElement("button"); toggle.textContent = src.enabled ? "Disable" : "Enable"; toggle.addEventListener("click", () => patchSource(src.id, { enabled: !src.enabled }));
-          const del = document.createElement("button"); del.className = "danger"; del.textContent = "Delete"; del.addEventListener("click", () => deleteSource(src.id));
-          const actions = document.createElement("div"); actions.className = "form-grid section"; actions.append(toggle, del);
-          el.append(strong, muted, actions); return el;
-        }) : [chip("No custom sources yet — Action: Add source")]));
-      }
-
-      function renderPublicDemo() {
-        const stats = state.publicStats || {};
-        $("demoItems").textContent = stats.global_items ?? initialItemsCount;
-        $("demoActiveOrg").textContent = state.activeOrg;
-        $("demoMode").textContent = modeLabel();
-        $("statusMode").textContent = modeLabel();
-        $("demoSources").textContent = stats.sources ?? state.sources.length;
-        $("demoHighCount").textContent = stats.global_high_critical ?? 0;
-        $("demoLastStatus").textContent = stats.last_status || (state.panelErrors.items ? "PARTIAL" : "OK");
-        $("demoOrgItems").textContent = stats.org_items ?? state.items.length;
-        $("demoOrgItemsChip").style.display = state.viewMode === "org" ? "inline-flex" : "none";
-        $("globalMode").classList.toggle("active", state.viewMode === "global");
-        $("orgMode").classList.toggle("active", state.viewMode === "org");
-      }
-
-      function renderDiagnostics() {
-        const links = [
-          ["Health", "/health"],
-          ["Dashboard health", "/api/dashboard-health"],
-          ["Items", scopedUrl("/api/items")],
-          ["Alerts", scopedUrl("/api/alerts")],
-          ["Sources", "/api/sources"],
-        ];
-        $("diagnostics").replaceChildren(...links.map(([label, href]) => {
-          const a = document.createElement("a"); a.href = href; a.target = "_blank"; a.rel = "noreferrer"; a.className = "chip"; a.textContent = label; return a;
-        }));
-      }
-
-      function panelErrorMessage(label, status) {
-        const pretty = { valueReport: "Value report", sourceConfigs: "Source config", onboarding: "Onboarding templates", alertEvents: "Alert events" }[label] || label.charAt(0).toUpperCase() + label.slice(1);
-        return `${pretty} failed${status ? ` (HTTP ${status})` : ""}`;
-      }
-
-      async function safeJsonFetch(url, options, fallback, label) {
-        try {
-          const response = await fetch(url, options);
-          if (response.status === 401) {
-            state.panelErrors[label] = panelErrorMessage(label, 401) + ": read blocked; add API key.";
-            return fallback;
-          }
-          if (!response.ok) {
-            state.panelErrors[label] = panelErrorMessage(label, response.status);
-            return fallback;
-          }
-          return await response.json();
-        } catch (err) {
-          state.panelErrors[label] = `${label} failed: ${err.message || "network error"}`;
-          return fallback;
-        }
-      }
-
-      function renderStatus() {
-        const criticalLabels = ["items", "publicStats", "sources"];
-        const failedCritical = criticalLabels.filter(label => state.panelErrors[label]);
-        const errors = Object.values(state.panelErrors);
-        if (failedCritical.length === criticalLabels.length) {
-          $("status").textContent = "Status: ERROR · critical dashboard APIs failed";
-          $("status").classList.add("err");
-        } else if (errors.length) {
-          $("status").textContent = `Status: PARTIAL · ${modeLabel()} · ${state.activeOrg} · ${state.items.length} visible items`;
-          $("status").classList.remove("err");
-        } else {
-          $("status").textContent = `Status: OK · ${modeLabel()} · ${state.activeOrg} · ${state.items.length} visible items`;
-          $("status").classList.remove("err");
-        }
-        $("statusDetails").replaceChildren(...errors.map(message => {
-          const div = document.createElement("div"); div.textContent = message; return div;
-        }));
-      }
-
-      function applyFilters() {
-        const q = $("q").value.toLowerCase(); const risk = $("risk").value; const category = $("category").value; const country = $("country").value; const sector = $("sector").value;
-        renderCards(state.items.filter(item => {
-          const text = `${item.title} ${item.summary} ${(item.tags || []).join(" ")}`.toLowerCase();
-          return (!q || text.includes(q)) && (!risk || item.risk_level === risk) && (!category || item.category === category) && (!country || (item.affected_countries || []).includes(country)) && (!sector || (item.affected_sectors || []).includes(sector));
-        }));
-      }
-
-      async function load() {
-        state.activeOrg = activeOrg();
-        state.viewMode = currentViewMode();
-        state.panelErrors = {};
-        $("activeOrgLabel").textContent = state.activeOrg;
-        $("wlOrg").value = $("wlOrg").value.trim() || state.activeOrg;
-        renderDiagnostics();
-        const headers = adminHeaders();
-        const requestOptions = { cache: "no-store", headers };
-        await Promise.allSettled([
-          safeJsonFetch(scopedUrl("/api/items"), requestOptions, [], "items").then(data => { state.items = Array.isArray(data) ? data : []; }),
-          safeJsonFetch(`/api/public-demo-stats?${orgQuery()}`, requestOptions, state.publicStats, "publicStats").then(data => { state.publicStats = data || state.publicStats; }),
-          safeJsonFetch(scopedUrl("/api/alerts"), requestOptions, { persisted: [], generated_preview: [], total_persisted: 0, total_generated_preview: 0 }, "alerts").then(data => { state.alerts = data || { persisted: [], generated_preview: [] }; }),
-          safeJsonFetch("/api/sources", requestOptions, [], "sources").then(data => { state.sources = Array.isArray(data) ? data : []; }),
-          safeJsonFetch(scopedUrl("/api/brief/daily"), requestOptions, {}, "brief").then(data => { state.brief = data || {}; }),
-          safeJsonFetch(`/api/watchlists?${orgQuery()}`, requestOptions, [], "watchlists").then(data => { state.watchlists = Array.isArray(data) ? data : []; }),
-          safeJsonFetch("/api/onboarding/template", requestOptions, { templates: {} }, "onboarding").then(data => { state.templates = (data && data.templates) || {}; }),
-          safeJsonFetch(valueReportUrl(), requestOptions, {}, "valueReport").then(data => { state.valueReport = data || {}; }),
-          safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; })
-        ]);
-        await Promise.allSettled((state.alerts.persisted || []).map(async alert => {
-          const events = await safeJsonFetch(`/api/alerts/${alert.id}/events`, requestOptions, [], "alertEvents");
-          alert.events = Array.isArray(events) ? events : [];
-        }));
-        hydrateFilters(); renderStats(); renderPublicDemo(); renderSidebars(); applyFilters(); renderStatus();
-      }
-
-      async function refreshNow() {
-        const b = $("refresh"); b.disabled = true; b.textContent = "Refreshing…"; setNotice("authNotice", "");
-        try {
-          const res = await fetch("/api/refresh", { method: "POST", headers: adminHeaders() });
-          if (res.status === 401) { setNotice("authNotice", "Refresh blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Refresh failed");
-          await load();
-        } catch (err) { setNotice("authNotice", err.message || "Refresh failed"); }
-        finally { b.disabled = false; b.textContent = "Refresh"; }
-      }
-
-      function applyTemplate(templateKey, demoNotice = false) {
-        const key = typeof templateKey === "string" ? templateKey : $("templateSelect").value; const tpl = state.templates[key];
-        if (key) $("templateSelect").value = key;
-        if (!tpl) return;
-        $("wlName").value = `${key} watchlist`;
-        $("wlCountries").value = (tpl.suggested_countries || []).join(", ");
-        $("wlSectors").value = (tpl.suggested_sectors || []).join(", ");
-        $("wlKeywords").value = (tpl.suggested_keywords || []).join(", ");
-        $("wlCves").value = (tpl.suggested_cves || []).join(", ");
-        $("wlActors").value = (tpl.suggested_threat_actors || []).join(", ");
-        setNotice("watchlistNotice", demoNotice ? "Template loaded. Add your API key to save it as a watchlist." : (tpl.explanation || "Template applied. Edit before saving."), true);
-      }
-
-      async function createWatchlist() {
-        setNotice("watchlistNotice", "");
-        const payload = { name: $("wlName").value.trim(), org_id: $("wlOrg").value.trim() || activeOrg(), countries: csv($("wlCountries").value), sectors: csv($("wlSectors").value), organizations: [], keywords: csv($("wlKeywords").value), cves: csv($("wlCves").value), threat_actors: csv($("wlActors").value) };
-        try {
-          const res = await fetch("/api/watchlists", { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
-          if (res.status === 401) { setNotice("watchlistNotice", "Write blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Watchlist create failed");
-          ["wlName", "wlCountries", "wlSectors", "wlKeywords", "wlCves", "wlActors"].forEach(id => $(id).value = ""); setNotice("watchlistNotice", "Watchlist created.", true); await load();
-        } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist create failed"); }
-      }
-
-
-      async function updateWatchlist(id, payload) {
-        setNotice("watchlistNotice", "");
-        try {
-          const res = await fetch(`/api/watchlists/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
-          if (res.status === 401) { setNotice("watchlistNotice", "Watchlist update blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Watchlist update failed");
-          setNotice("watchlistNotice", "Watchlist updated.", true); await load();
-        } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist update failed"); }
-      }
-
-      async function generateAlerts() {
-        const b = $("generateAlerts"); b.disabled = true; setNotice("alertNotice", "");
-        try {
-          const res = await fetch(`/api/alerts/generate?${orgQuery()}`, { method: "POST", headers: adminHeaders() });
-          if (res.status === 401) { setNotice("alertNotice", "Alert generation blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Alert generation failed");
-          const payload = await res.json();
-          setNotice("alertNotice", `Created ${payload.created || 0} alerts, ${payload.existing || 0} already existed.`, true);
-          await load();
-        } catch (err) { setNotice("alertNotice", err.message || "Alert generation failed"); }
-        finally { b.disabled = false; }
-      }
-
-      async function createSource() {
-        setNotice("sourceConfigNotice", "");
-        const payload = { url: $("sourceUrl").value.trim(), label: $("sourceLabel").value.trim(), category: $("sourceCategory").value, enabled: true };
-        try { const res = await fetch("/api/source-configs", { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
-          if (res.status === 401) { setNotice("sourceConfigNotice", "Source create blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Source create failed"); setNotice("sourceConfigNotice", "Source added.", true); await load();
-        } catch (err) { setNotice("sourceConfigNotice", err.message || "Source create failed"); }
-      }
-      async function patchSource(id, payload) { const res = await fetch(`/api/source-configs/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) }); if (res.status === 401) setNotice("sourceConfigNotice", "Source update blocked: invalid or missing API key."); await load(); }
-      async function deleteSource(id) { const res = await fetch(`/api/source-configs/${id}`, { method: "DELETE", headers: adminHeaders() }); if (res.status === 401) setNotice("sourceConfigNotice", "Source delete blocked: invalid or missing API key."); await load(); }
-
-      async function telegramPreview(id) {
-        setNotice("alertNotice", "");
-        try {
-          const res = await fetch(`/api/alerts/${id}/telegram-preview`, { method: "POST", headers: adminHeaders() });
-          if (res.status === 401) { setNotice("alertNotice", "Telegram preview blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Telegram preview failed");
-          const payload = await res.json();
-          $("telegramPreviewText").value = payload.message || "";
-          $("telegramPreviewPanel").style.display = "block";
-        } catch (err) { setNotice("alertNotice", err.message || "Telegram preview failed"); }
-      }
-
-      async function telegramSend(id) {
-        setNotice("alertNotice", "");
-        try { const res = await fetch(`/api/alerts/${id}/telegram-send`, { method: "POST", headers: adminHeaders() });
-          const payload = await res.json().catch(() => ({}));
-          if (res.status === 401) { setNotice("alertNotice", "Telegram send blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error(payload.detail || "Telegram send failed");
-          setNotice("alertNotice", payload.detail || "Telegram sent.", true); await load();
-        } catch (err) { setNotice("alertNotice", err.message || "Telegram send failed"); }
-      }
-
-      async function deleteWatchlist(id) {
-        try {
-          const res = await fetch(`/api/watchlists/${id}`, { method: "DELETE", headers: adminHeaders() });
-          if (res.status === 401) { setNotice("watchlistNotice", "Delete blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Watchlist delete failed"); setNotice("watchlistNotice", "Watchlist deleted.", true); await load();
-        } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist delete failed"); }
-      }
-
-      async function patchAlert(id, payload) {
-        try {
-          const res = await fetch(`/api/alerts/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
-          if (res.status === 401) { setNotice("authNotice", "Alert update blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Alert update failed"); await load();
-        } catch (err) { setNotice("authNotice", err.message || "Alert update failed"); }
-      }
-
-
-      async function downloadCsv(url, filename) {
-        setNotice("authNotice", "");
-        try {
-          const res = await fetch(url, { headers: adminHeaders(), cache: "no-store" });
-          if (res.status === 401) { setNotice("authNotice", "Export blocked: invalid or missing API key"); return; }
-          if (!res.ok) throw new Error("Export failed");
-          const blob = await res.blob();
-          const link = document.createElement("a");
-          link.href = URL.createObjectURL(blob);
-          link.download = filename;
-          document.body.append(link);
-          link.click();
-          link.remove();
-          URL.revokeObjectURL(link.href);
-        } catch (err) { setNotice("authNotice", err.message || "Export failed"); }
-      }
-
-      $("refresh").addEventListener("click", refreshNow);
-      $("createWatchlist").addEventListener("click", createWatchlist);
-      $("templateSelect").addEventListener("change", applyTemplate);
-      $("createSource").addEventListener("click", createSource);
-      $("exportAlerts").addEventListener("click", () => downloadCsv(exportUrl("/api/export/alerts.csv"), "alerts.csv"));
-      $("exportValue").addEventListener("click", () => downloadCsv(state.viewMode === "org" ? `/api/export/value-report.csv?${orgQuery()}&days=7` : "/api/export/value-report.csv?days=7", "value-report.csv"));
-      $("generateAlerts").addEventListener("click", generateAlerts);
-      controls.forEach(control => control.addEventListener("input", applyFilters));
-      alertControls.forEach(control => control.addEventListener("input", renderAlerts));
-      $("globalMode").addEventListener("click", () => setViewMode("global"));
-      $("orgMode").addEventListener("click", () => setViewMode("org"));
-      document.querySelectorAll("[data-demo-template]").forEach(button => button.addEventListener("click", () => applyTemplate(button.dataset.demoTemplate, true)));
-      load();
+      fetch('/api/public-demo-stats', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(data => {
+        if (!data) return;
+        document.getElementById('globalItems').textContent = data.global_items ?? '0';
+        document.getElementById('sources').textContent = data.sources ?? '0';
+        document.getElementById('highCritical').textContent = data.global_high_critical ?? '0';
+        document.getElementById('lastRefresh').textContent = data.last_status?.status || data.last_status || 'unknown';
+      }).catch(() => {});
     </script>
   </body>
 </html>

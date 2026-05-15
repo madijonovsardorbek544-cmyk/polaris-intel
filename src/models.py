@@ -111,3 +111,25 @@ class OrgScoringProfile:
     high_priority_sectors: list[str] = field(default_factory=list)
     risk_boost_keywords: list[str] = field(default_factory=list)
     risk_reduce_keywords: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PilotLead:
+    id: str
+    name: str
+    organization: str = ""
+    role: str = ""
+    email: str = ""
+    country: str = ""
+    organization_type: str = ""
+    problem_description: str = ""
+    preferred_contact_method: str = ""
+    created_at: str = ""
+    status: str = "new"
+
+
+@dataclass
+class PublicMetrics:
+    landing_page_views: int = 0
+    demo_page_views: int = 0
+    pilot_form_submissions: int = 0
