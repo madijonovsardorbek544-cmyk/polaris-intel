@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .config import settings
-from .database import init_db, list_items
+from .database import increment_public_metric, init_db, list_items
 from .routes.health import router as health_router
 from .routes.intelligence import router as intelligence_router
 from .routes.watchlists import router as watchlists_router
@@ -47,26 +47,52 @@ async def home_head() -> Response:
     return Response(status_code=200)
 
 
+async def _page_context(request: Request) -> dict[str, object]:
+    items = await list_items(settings.max_items)
+    return {
+        "request": request,
+        "app_name": settings.app_name,
+        "version": settings.app_version,
+        "items_count": len(items),
+        "status": refresh_status(),
+        "default_org": settings.default_org,
+        "demo_mode": not bool(settings.database_url),
+        "api_key_configured": bool(settings.api_key),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> HTMLResponse:
     try:
         await refresh_store(force=False)
     except Exception as exc:
+        logger.warning("Landing refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
+    await increment_public_metric("landing_page_views")
+    return templates.TemplateResponse("index.html", await _page_context(request))
+
+
+@app.get("/demo", response_class=HTMLResponse)
+async def demo(request: Request) -> HTMLResponse:
+    try:
+        await refresh_store(force=False)
+    except Exception as exc:
+        logger.warning("Demo refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
+    await increment_public_metric("demo_page_views")
+    return templates.TemplateResponse("demo.html", await _page_context(request))
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request) -> HTMLResponse:
+    try:
+        await refresh_store(force=False)
+    except Exception as exc:
         logger.warning("Dashboard refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
-    items = await list_items(settings.max_items)
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "app_name": settings.app_name,
-            "version": settings.app_version,
-            "items_count": len(items),
-            "status": refresh_status(),
-            "default_org": settings.default_org,
-            "demo_mode": not bool(settings.database_url),
-            "api_key_configured": bool(settings.api_key),
-        },
-    )
+    return templates.TemplateResponse("dashboard.html", await _page_context(request))
+
+
+@app.get("/request-pilot", response_class=HTMLResponse)
+async def request_pilot(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("request_pilot.html", await _page_context(request))
 
 
 @app.get("/latest")

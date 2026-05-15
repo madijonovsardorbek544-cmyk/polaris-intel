@@ -208,7 +208,7 @@ def test_dashboard_html_smoke(monkeypatch) -> None:
         return {"ok": True, "status": "TEST", "items": 0}
 
     monkeypatch.setattr("src.main.refresh_store", fake_refresh_store)
-    response = _client().get("/")
+    response = _client().get("/dashboard")
     assert response.status_code == 200
     html = response.text
     assert "POLARIS" in html
@@ -228,7 +228,7 @@ def test_dashboard_single_org_controls_exist(monkeypatch) -> None:
         return {"ok": True, "status": "TEST", "items": 0}
 
     monkeypatch.setattr("src.main.refresh_store", fake_refresh_store)
-    response = _client().get("/")
+    response = _client().get("/dashboard")
     assert response.status_code == 200
     html = response.text
     assert "Active org_id" in html
@@ -249,7 +249,7 @@ def test_dashboard_watchlist_edit_alert_generation_and_telegram_controls(monkeyp
         return {"ok": True, "status": "TEST", "items": 0}
 
     monkeypatch.setattr("src.main.refresh_store", fake_refresh_store)
-    html = _client().get("/").text
+    html = _client().get("/dashboard").text
     assert "data-watchlist-edit" in html
     assert "Save watchlist" in html
     assert "Generate persistent alerts" in html

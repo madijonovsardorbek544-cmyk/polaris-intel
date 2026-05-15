@@ -12,9 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from ..auth import require_api_key, require_read_api_key
 from ..config import settings
-from ..database import add_alert_event, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, list_alert_events, list_alerts, list_items, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, update_alert, update_source_config
-from ..models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, SourceConfig
-from ..schemas import AlertUpdate, OrgScoringProfileIn, SourceConfigCreate, SourceConfigUpdate
+from ..database import add_alert_event, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_alert_events, list_alerts, list_items, list_pilot_leads, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, update_alert, update_pilot_lead_status, update_source_config
+from ..models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, PilotLead, SourceConfig
+from ..schemas import AlertUpdate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
 from ..services.analysis import now_iso
 from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_status, refresh_store, seed_demo_items
@@ -48,6 +48,46 @@ async def _dashboard_check(name: str, operation) -> tuple[str, dict[str, object]
     except Exception as exc:
         logger.warning("Dashboard health check failed check=%s error_type=%s message=%s", name, type(exc).__name__, str(exc))
         return name, {"ok": False, "error": type(exc).__name__}, f"{name} failed: {type(exc).__name__}"
+
+
+
+
+@router.post("/leads", status_code=status.HTTP_201_CREATED)
+async def create_lead(payload: PilotLeadCreate) -> dict[str, object]:
+    lead = PilotLead(
+        id=str(uuid.uuid4()),
+        name=payload.name.strip(),
+        organization=payload.organization.strip(),
+        role=payload.role.strip(),
+        email=payload.email.strip(),
+        country=payload.country.strip(),
+        organization_type=payload.organization_type.strip(),
+        problem_description=payload.problem_description.strip(),
+        preferred_contact_method=payload.preferred_contact_method.strip(),
+        created_at=now_iso(),
+        status="new",
+    )
+    saved = await add_pilot_lead(lead)
+    await increment_public_metric("pilot_form_submissions")
+    return asdict(saved)
+
+
+@router.get("/leads", dependencies=[Depends(require_api_key)])
+async def leads(limit: int = Query(default=50, ge=1, le=200)) -> list[dict[str, object]]:
+    return [asdict(lead) for lead in await list_pilot_leads(limit)]
+
+
+@router.patch("/leads/{lead_id}", dependencies=[Depends(require_api_key)])
+async def patch_lead(lead_id: str, payload: PilotLeadUpdate) -> dict[str, object]:
+    lead = await update_pilot_lead_status(lead_id, payload.status)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return asdict(lead)
+
+
+@router.get("/public-metrics", dependencies=[Depends(require_api_key)])
+async def public_metrics() -> dict[str, int]:
+    return asdict(await get_public_metrics())
 
 
 @router.get("/dashboard-health", dependencies=[Depends(require_read_api_key)])

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
-from .models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
+from .models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, PilotLead, PublicMetrics, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
 
 _ITEMS: list[IntelligenceItem] = []
 _WATCHLISTS: list[Watchlist] = []
@@ -16,6 +16,8 @@ _ALERTS: list[Alert] = []
 _ALERT_EVENTS: list[AlertEvent] = []
 _SOURCE_CONFIGS: list[SourceConfig] = []
 _ORG_PROFILES: dict[str, OrgScoringProfile] = {}
+_PILOT_LEADS: list[PilotLead] = []
+_PUBLIC_METRICS = PublicMetrics()
 _LOCK = asyncio.Lock()
 
 
@@ -249,6 +251,27 @@ async def init_db() -> None:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS org_scoring_profiles (
                         org_id TEXT PRIMARY KEY, high_priority_countries JSONB NOT NULL DEFAULT '[]'::jsonb, high_priority_sectors JSONB NOT NULL DEFAULT '[]'::jsonb, risk_boost_keywords JSONB NOT NULL DEFAULT '[]'::jsonb, risk_reduce_keywords JSONB NOT NULL DEFAULT '[]'::jsonb
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS pilot_leads (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        organization TEXT NOT NULL DEFAULT '',
+                        role TEXT NOT NULL DEFAULT '',
+                        email TEXT NOT NULL,
+                        country TEXT NOT NULL DEFAULT '',
+                        organization_type TEXT NOT NULL,
+                        problem_description TEXT NOT NULL,
+                        preferred_contact_method TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'new'
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS public_metrics (
+                        metric_key TEXT PRIMARY KEY,
+                        metric_value INTEGER NOT NULL DEFAULT 0
                     );
                 """)
             conn.commit()
@@ -820,3 +843,136 @@ async def reset_memory_state() -> None:
         _ALERT_EVENTS.clear()
         _SOURCE_CONFIGS.clear()
         _ORG_PROFILES.clear()
+        _PILOT_LEADS.clear()
+        _PUBLIC_METRICS.landing_page_views = 0
+        _PUBLIC_METRICS.demo_page_views = 0
+        _PUBLIC_METRICS.pilot_form_submissions = 0
+
+
+
+def _lead_from_row(row: tuple[Any, ...]) -> PilotLead:
+    return PilotLead(
+        id=row[0],
+        name=row[1],
+        organization=row[2] or "",
+        role=row[3] or "",
+        email=row[4],
+        country=row[5] or "",
+        organization_type=row[6],
+        problem_description=row[7],
+        preferred_contact_method=row[8] or "",
+        created_at=_dt(row[9]) or "",
+        status=row[10] or "new",
+    )
+
+
+async def add_pilot_lead(lead: PilotLead) -> PilotLead:
+    async with _LOCK:
+        _PILOT_LEADS.insert(0, lead)
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO pilot_leads (id, name, organization, role, email, country, organization_type,
+                            problem_description, preferred_contact_method, created_at, status)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                        """,
+                        (lead.id, lead.name, lead.organization, lead.role, lead.email, lead.country, lead.organization_type,
+                         lead.problem_description, lead.preferred_contact_method, lead.created_at, lead.status),
+                    )
+                conn.commit()
+        await asyncio.to_thread(run)
+    return lead
+
+
+async def list_pilot_leads(limit: int = 50) -> list[PilotLead]:
+    if database_enabled():
+        def run() -> list[PilotLead]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id, name, organization, role, email, country, organization_type, problem_description,
+                               preferred_contact_method, created_at, status
+                        FROM pilot_leads
+                        ORDER BY created_at DESC
+                        LIMIT %s;
+                        """,
+                        (limit,),
+                    )
+                    return [_lead_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return list(_PILOT_LEADS[:limit])
+
+
+async def update_pilot_lead_status(lead_id: str, status: str) -> PilotLead | None:
+    updated: PilotLead | None = None
+    async with _LOCK:
+        for lead in _PILOT_LEADS:
+            if lead.id == lead_id:
+                lead.status = status
+                updated = lead
+                break
+    if database_enabled():
+        def run() -> PilotLead | None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE pilot_leads SET status = %s WHERE id = %s
+                        RETURNING id, name, organization, role, email, country, organization_type, problem_description,
+                                  preferred_contact_method, created_at, status;
+                        """,
+                        (status, lead_id),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+                return _lead_from_row(row) if row else None
+        updated = await asyncio.to_thread(run) or updated
+    return updated
+
+
+async def increment_public_metric(metric_key: str) -> PublicMetrics:
+    allowed = {"landing_page_views", "demo_page_views", "pilot_form_submissions"}
+    if metric_key not in allowed:
+        raise ValueError("Unknown public metric")
+    async with _LOCK:
+        setattr(_PUBLIC_METRICS, metric_key, getattr(_PUBLIC_METRICS, metric_key) + 1)
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO public_metrics (metric_key, metric_value) VALUES (%s, 1)
+                        ON CONFLICT (metric_key) DO UPDATE SET metric_value = public_metrics.metric_value + 1;
+                        """,
+                        (metric_key,),
+                    )
+                conn.commit()
+        await asyncio.to_thread(run)
+    return await get_public_metrics()
+
+
+async def get_public_metrics() -> PublicMetrics:
+    if database_enabled():
+        def run() -> dict[str, int]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT metric_key, metric_value FROM public_metrics;")
+                    return {row[0]: int(row[1]) for row in cur.fetchall()}
+        rows = await asyncio.to_thread(run)
+        return PublicMetrics(
+            landing_page_views=rows.get("landing_page_views", 0),
+            demo_page_views=rows.get("demo_page_views", 0),
+            pilot_form_submissions=rows.get("pilot_form_submissions", 0),
+        )
+    async with _LOCK:
+        return PublicMetrics(
+            landing_page_views=_PUBLIC_METRICS.landing_page_views,
+            demo_page_views=_PUBLIC_METRICS.demo_page_views,
+            pilot_form_submissions=_PUBLIC_METRICS.pilot_form_submissions,
+        )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .config import settings
 
@@ -129,3 +129,46 @@ class OrgScoringProfileIn(BaseModel):
 
 class OrgScoringProfileOut(OrgScoringProfileIn):
     org_id: str
+
+
+class PilotLeadCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    organization: str = Field(default="", max_length=200)
+    role: str = Field(default="", max_length=200)
+    email: str = Field(..., min_length=3, max_length=320)
+    country: str = Field(default="", max_length=120)
+    organization_type: str = Field(..., min_length=1, max_length=120)
+    problem_description: str = Field(..., min_length=1, max_length=4000)
+    preferred_contact_method: str = Field(default="", max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def email_must_look_valid(cls, value: str) -> str:
+        cleaned = value.strip()
+        if "@" not in cleaned or "." not in cleaned.rsplit("@", 1)[-1]:
+            raise ValueError("email must look like an email address")
+        return cleaned
+
+    @field_validator("name", "organization_type", "problem_description")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("field is required")
+        return cleaned
+
+
+class PilotLeadUpdate(BaseModel):
+    status: str = Field(..., pattern="^(new|contacted|qualified|rejected)$")
+
+
+class PilotLeadOut(PilotLeadCreate):
+    id: str
+    created_at: str
+    status: str = "new"
+
+
+class PublicMetricsOut(BaseModel):
+    landing_page_views: int = 0
+    demo_page_views: int = 0
+    pilot_form_submissions: int = 0
