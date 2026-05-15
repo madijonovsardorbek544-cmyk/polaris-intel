@@ -466,12 +466,18 @@ async def create_item_feedback(item_id: str, payload: ItemFeedbackCreate) -> dic
         comment=payload.comment.strip(),
         created_at=now_iso(),
     )
-    return asdict(await add_item_feedback(feedback))
+    saved = await add_item_feedback(feedback)
+    return {"ok": True, "feedback_id": saved.id, "item_id": saved.item_id}
 
 
 @router.get("/feedback", dependencies=[Depends(require_api_key)])
-async def feedback(limit: int = Query(default=200, ge=1, le=500)) -> list[dict[str, object]]:
-    return [asdict(item) for item in await list_item_feedback(limit)]
+async def feedback(
+    org_id: str | None = Query(default=None, min_length=1, max_length=80),
+    item_id: str | None = Query(default=None, min_length=1, max_length=200),
+    relevance: str | None = Query(default=None, pattern="^(useful|not_useful|false_positive)$"),
+    limit: int = Query(default=200, ge=1, le=500),
+) -> list[dict[str, object]]:
+    return [asdict(item) for item in await list_item_feedback(limit, org_id=org_id, item_id=item_id, relevance=relevance)]
 
 
 @router.get("/export/alerts.csv", dependencies=[Depends(require_read_api_key)])
