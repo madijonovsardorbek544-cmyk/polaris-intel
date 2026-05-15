@@ -50,6 +50,9 @@
       .mini strong { display:block; font-size:13px; margin-bottom:4px; }
       .err { color:var(--critical); } .ok { color:var(--ok); }
       .notice { min-height:18px; margin-top:8px; font-size:13px; }
+      .deployment-banners { display:grid; gap:10px; margin:0 0 16px; }
+      .banner { border:1px solid var(--line); border-radius:14px; padding:11px 14px; font-size:14px; background:rgba(138,180,255,.12); color:var(--text); }
+      .banner.warning { border-color:rgba(255,159,104,.45); background:rgba(255,159,104,.14); }
       @media (max-width: 1050px) { .layout, .hero { grid-template-columns:1fr; } .sidebar { position:static; } .toolbar { grid-template-columns:1fr 1fr; } .stats { grid-template-columns:1fr 1fr; } }
       @media (max-width: 640px) { .toolbar, .stats, .form-grid { grid-template-columns:1fr; } }
     </style>
@@ -63,6 +66,17 @@
         </div>
         <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div></div>
       </header>
+
+      {% if demo_mode or not api_key_configured %}
+      <section class="deployment-banners" aria-label="Deployment status">
+        {% if demo_mode %}
+        <div class="banner">Demo mode: data is stored in memory and may reset.</div>
+        {% endif %}
+        {% if not api_key_configured %}
+        <div class="banner warning">Warning: write actions are unprotected. Set POLARIS_API_KEY before public deployment.</div>
+        {% endif %}
+      </section>
+      {% endif %}
 
       <section class="stats">
         <div class="stat"><strong id="totalItems">—</strong><span>Items</span></div>

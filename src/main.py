@@ -58,6 +58,8 @@ async def home(request: Request) -> HTMLResponse:
             "items_count": len(items),
             "status": refresh_status(),
             "default_org": settings.default_org,
+            "demo_mode": not bool(settings.database_url),
+            "api_key_configured": bool(settings.api_key),
         },
     )
 

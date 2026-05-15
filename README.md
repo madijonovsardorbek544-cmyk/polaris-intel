@@ -1,5 +1,9 @@
 # POLARIS Intel
 
+## Live Demo
+
+Live demo: Coming soon. Deploy using the instructions below.
+
 POLARIS Intel is a **single-org pilot deployment product** for explainable cyber-geopolitical intelligence. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches intelligence against operator watchlists, persists alerts, and presents a FastAPI/Jinja2 dashboard for controlled pilot deployments.
 
 POLARIS is **not enterprise-grade multi-tenant SaaS yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is built for one pilot organization at a time, with honest limits and simple operator controls.
@@ -243,20 +247,134 @@ pytest -q
 
 The suite covers scoring, entity extraction, watchlist matching, `.env` loading, source failure logging, explainability factors, alert generation and persistence counts, daily brief generation, watchlist CRUD endpoints, API endpoint smoke tests, deduplication, optional read protection, default org behavior, demo reset behavior, dashboard control smoke tests, and Telegram alert formatting. Tests use isolated in-memory state and do not require real network calls.
 
-## Deployment notes
+## Smoke commands
 
-A simple pilot deployment should:
-
-1. Install `requirements.txt`.
-2. Set environment variables, especially `POLARIS_API_KEY`, `POLARIS_DEFAULT_ORG`, and normally `DATABASE_URL` for persistence.
-3. Consider `POLARIS_PROTECT_READS=true` before exposing a pilot instance beyond a trusted demo environment.
-4. Run with a production ASGI server command such as:
+Local run:
 
 ```bash
-uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}
+pip install -r requirements.txt
+uvicorn src.main:app --reload
 ```
 
-For platforms with a `Procfile`, ensure it points to `uvicorn src.main:app` and provides `PORT`.
+Production-like run:
+
+```bash
+PORT=8000 uvicorn src.main:app --host 0.0.0.0 --port 8000
+```
+
+Test:
+
+```bash
+pytest -q
+```
+
+## Deployment
+
+POLARIS is a FastAPI backend application and must be deployed to a platform that runs a Python web server. Do **not** use GitHub Pages as the live app host; GitHub Pages can only host static files and will not run the FastAPI API, dashboard actions, or health checks.
+
+**Public demo safety warning:** For public deployments, set `POLARIS_API_KEY` before sharing the link. Recommended public read-only demo settings are:
+
+```env
+POLARIS_API_KEY=<strong-random-key>
+POLARIS_PROTECT_READS=false
+```
+
+With those settings, the dashboard and read endpoints remain publicly viewable, while write actions return HTTP 401 unless the operator sends `X-Polaris-API-Key`. If `POLARIS_API_KEY` is empty, write actions are intentionally open only for local development and private demos.
+
+### A) Render deployment
+
+Render is the recommended beginner-friendly path for the first public demo.
+
+1. Push this repository to GitHub.
+2. Open Render and choose **New +** → **Web Service**.
+3. Connect the GitHub repository.
+4. Use **Runtime: Python**.
+5. Set **Build Command** to:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+6. Set **Start Command** to:
+
+   ```bash
+   uvicorn src.main:app --host 0.0.0.0 --port $PORT
+   ```
+
+7. Set **Health Check Path** to `/health` if Render asks for one.
+8. Add environment variables:
+   - `POLARIS_API_KEY=<strong-random-key>`
+   - `POLARIS_PROTECT_READS=false`
+   - `POLARIS_DEFAULT_ORG=demo`
+   - `DATABASE_URL=` optional; leave empty for in-memory demo mode or set a PostgreSQL URL for persistence
+   - `MAX_ITEMS=60`
+   - `AUTO_REFRESH_SECONDS=900`
+   - `HTTP_TIMEOUT=15`
+   - `LOG_LEVEL=INFO`
+   - Optional: `FEEDS=` comma-separated RSS feed override
+   - Optional: `TELEGRAM_BOT_TOKEN=` and `TELEGRAM_CHAT_ID=` only if enabling Telegram sends
+9. Deploy the service.
+10. Open the Render URL and verify `/` and `/health`.
+11. Copy the Render URL into the README **Live Demo** line and GitHub repository Website field.
+
+This repository also includes `render.yaml` for Render Blueprint deployment. The manual settings above are still shown so beginners can deploy without learning Blueprints first.
+
+### B) Railway deployment
+
+1. Push this repository to GitHub.
+2. Open Railway and choose **New Project** → **Deploy from GitHub repo**.
+3. Select the POLARIS Intel repository.
+4. Railway can use the included `railway.json`. If Railway asks for a start command, set:
+
+   ```bash
+   uvicorn src.main:app --host 0.0.0.0 --port $PORT
+   ```
+
+5. Add environment variables:
+   - `POLARIS_API_KEY=<strong-random-key>`
+   - `POLARIS_PROTECT_READS=false`
+   - `POLARIS_DEFAULT_ORG=demo`
+   - `DATABASE_URL=` optional; leave empty for in-memory demo mode or attach Railway PostgreSQL
+   - `MAX_ITEMS=60`
+   - `AUTO_REFRESH_SECONDS=900`
+   - `HTTP_TIMEOUT=15`
+   - `LOG_LEVEL=INFO`
+   - Optional: `FEEDS=`
+6. Deploy and open the generated Railway domain.
+7. Verify `/` and `/health`, then add the live URL to README and GitHub About.
+
+### C) Docker deployment
+
+Build the image:
+
+```bash
+docker build -t polaris-intel .
+```
+
+Run an in-memory public-read demo locally:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e PORT=8000 \
+  -e POLARIS_API_KEY=<strong-random-key> \
+  -e POLARIS_PROTECT_READS=false \
+  -e POLARIS_DEFAULT_ORG=demo \
+  polaris-intel
+```
+
+For PostgreSQL persistence, also pass `-e DATABASE_URL=<postgres-url>`.
+
+## Add the live link to GitHub
+
+After deployment:
+
+1. Open the GitHub repository.
+2. Click the gear/settings icon near the About section.
+3. Paste the deployed app URL into the Website field.
+4. Save.
+5. Keep the same URL in README under Live Demo.
+
+Replace the README placeholder line `Live demo: Coming soon. Deploy using the instructions below.` with your deployed Render URL, for example `Live demo: https://your-service-name.onrender.com`.
 
 ## Pilot customer workflow upgrade
 
