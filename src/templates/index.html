@@ -2,201 +2,132 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>POLARIS Intel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ app_name }}</title>
     <style>
-      :root { color-scheme: dark; }
-      body {
-        margin: 0;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-        background: #0b1220;
-        color: #e8eefc;
-      }
-      .wrap { max-width: 980px; margin: 0 auto; padding: 48px 18px; }
-      h1 { margin: 0 0 10px; font-size: 42px; letter-spacing: .5px; }
-      .status { opacity: .8; margin-bottom: 22px; }
-      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 14px 0 18px; }
-      button {
-        background: #1f2a44; border: 1px solid #2d3a5d; color: #e8eefc;
-        padding: 10px 14px; border-radius: 10px; cursor: pointer;
-      }
-      button:hover { filter: brightness(1.08); }
-      input {
-        background: #0f1930; border: 1px solid #2d3a5d; color: #e8eefc;
-        padding: 10px 12px; border-radius: 10px; min-width: 240px;
-      }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-      .card {
-        background: #0f1930; border: 1px solid #2d3a5d; border-radius: 14px;
-        padding: 14px 14px 12px;
-      }
-      .card h3 { margin: 0 0 8px; font-size: 18px; line-height: 1.25; }
-      .summary {
-        font-size: 14px;
-        line-height: 1.45;
-        opacity: 0.95;
-        white-space: pre-wrap;      /* newlines tartibli ko‘rinadi */
-        overflow-wrap: anywhere;    /* uzun so‘z/URL bo‘lsa ham joyni buzmaydi */
-        word-break: break-word;
-      }
-      .meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; opacity: .85; margin-top: 10px; }
-      .pill { padding: 3px 8px; border-radius: 999px; border: 1px solid #2d3a5d; background: #101b33; }
-      a { color: #89b4ff; overflow-wrap: anywhere; word-break: break-word; }
-      .small { font-size: 12px; opacity: .75; margin-top: 10px; }
-      .footer { font-size: 12px; opacity: .75; margin-top: 18px; }
-      .err { color: #ff8f8f; }
+      :root { color-scheme: dark; --bg:#050913; --panel:rgba(255,255,255,.06); --panel2:rgba(255,255,255,.09); --line:rgba(255,255,255,.13); --text:rgba(255,255,255,.94); --muted:rgba(255,255,255,.66); --accent:#8ab4ff; --bad:#ff6b7a; --warn:#ffb86b; --ok:#78d7a3; }
+      * { box-sizing: border-box; }
+      body { margin:0; min-height:100vh; font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:var(--text); background:radial-gradient(900px 500px at 20% -10%,rgba(68,120,255,.32),transparent 60%),radial-gradient(700px 400px at 100% 0,rgba(255,107,122,.13),transparent 55%),linear-gradient(180deg,#050913,#08111f 60%,#050913); }
+      a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+      .shell { width:min(1440px,calc(100% - 32px)); margin:0 auto; padding:28px 0 48px; }
+      .hero { display:grid; grid-template-columns:1fr auto; gap:16px; align-items:end; margin-bottom:18px; }
+      h1 { margin:0; font-size:clamp(34px,7vw,76px); letter-spacing:-.045em; line-height:.94; }
+      .subtitle { color:var(--muted); max-width:820px; margin-top:10px; line-height:1.55; }
+      .status,.panel,.card,.stat { border:1px solid var(--line); background:linear-gradient(180deg,var(--panel2),var(--panel)); border-radius:22px; box-shadow:0 22px 60px rgba(0,0,0,.24); }
+      .status { padding:14px 16px; color:var(--muted); min-width:230px; }
+      .toolbar { display:grid; grid-template-columns:1.5fr repeat(4,minmax(120px,.5fr)) auto; gap:10px; margin:18px 0; }
+      input,select,button { border:1px solid var(--line); border-radius:14px; padding:12px 13px; color:var(--text); background:rgba(255,255,255,.055); outline:none; }
+      button { cursor:pointer; font-weight:800; background:rgba(138,180,255,.14); border-color:rgba(138,180,255,.28); } button:hover { background:rgba(138,180,255,.22); } button:disabled { opacity:.65; cursor:wait; }
+      .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:16px 0 20px; }
+      .stat { padding:16px; } .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; } .value { font-size:30px; font-weight:900; margin-top:6px; }
+      .content { display:grid; grid-template-columns:340px 1fr; gap:16px; align-items:start; }
+      .side { display:grid; gap:14px; position:sticky; top:16px; }
+      .panel { padding:16px; } .panel h2 { font-size:16px; margin:0 0 10px; } .muted { color:var(--muted); line-height:1.5; font-size:14px; }
+      .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+      .chip,.pill { border:1px solid var(--line); background:rgba(255,255,255,.04); color:var(--muted); padding:6px 9px; border-radius:999px; font-size:12px; }
+      .chip.bad { border-color:rgba(255,107,122,.45); color:#ffd7dc; } .chip.ok { border-color:rgba(120,215,163,.45); color:#d9ffe9; }
+      .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+      .card { padding:18px; display:flex; flex-direction:column; gap:12px; min-height:350px; }
+      .cardHeader { display:flex; justify-content:space-between; gap:10px; align-items:start; } .card h3 { margin:0; line-height:1.3; font-size:17px; }
+      .riskBadge { flex:0 0 auto; font-weight:900; border-radius:14px; padding:8px 10px; border:1px solid var(--line); }
+      .Critical { color:#ffd6db; background:rgba(255,95,109,.16); border-color:rgba(255,95,109,.45); } .High { color:#ffe1d1; background:rgba(255,159,104,.14); border-color:rgba(255,159,104,.45); } .Medium { color:#fff0bf; background:rgba(255,209,102,.12); border-color:rgba(255,209,102,.42); } .Low { color:#d7f2ff; background:rgba(142,202,230,.12); border-color:rgba(142,202,230,.4); }
+      .summary { color:rgba(255,255,255,.8); line-height:1.55; font-size:14px; }
+      .explain { display:grid; gap:8px; margin-top:auto; } .explain div { border-left:3px solid rgba(138,180,255,.45); padding-left:10px; color:var(--muted); line-height:1.45; font-size:13px; }
+      .factorList { margin:0; padding-left:18px; color:var(--muted); font-size:12.5px; line-height:1.45; }
+      .source { color:var(--muted); font-size:12.5px; overflow-wrap:anywhere; } .empty { grid-column:1/-1; padding:28px; text-align:center; color:var(--muted); } .err { color:#ffb3b3; }
+      @media (max-width:1100px) { .toolbar{grid-template-columns:1fr 1fr;} .content{grid-template-columns:1fr;} .side{position:static;} }
+      @media (max-width:760px) { .shell{width:min(100% - 22px,1440px);padding-top:18px;} .hero,.stats,.grid,.toolbar{grid-template-columns:1fr;} .status{min-width:unset;} }
     </style>
   </head>
   <body>
-    <div class="wrap">
-      <h1>POLARIS Intel</h1>
-      <div id="status" class="status">Status: loading...</div>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <h1>{{ app_name }}</h1>
+          <div class="subtitle">Paid pilot-ready foundation for explainable cyber-geopolitical risk intelligence: RSS ingestion, transparent scoring, watchlist matching, alerts, source health, and daily briefs.</div>
+        </div>
+        <div class="status" id="status">Status: {{ status }} · {{ items_count }} items · v{{ version }}</div>
+      </section>
 
-      <div class="row">
-        <button id="btnReload" type="button">Reload</button>
-        <input id="search" type="text" placeholder="Search title / summary / tags..." />
-      </div>
+      <section class="toolbar" aria-label="Filters">
+        <input id="search" type="search" placeholder="Search title, summary, tags, CVEs..." />
+        <select id="category"><option value="">All categories</option></select>
+        <select id="risk"><option value="">All risk levels</option></select>
+        <select id="country"><option value="">All countries</option></select>
+        <select id="sector"><option value="">All sectors</option></select>
+        <button id="refresh" type="button">Refresh</button>
+      </section>
 
-      <div id="cards" class="grid"></div>
+      <section class="stats" id="stats"></section>
 
-      <div class="footer">
-        Tip: API endpoint → <a href="/api/latest" target="_blank" rel="noreferrer">/api/latest</a>
-      </div>
-    </div>
+      <section class="content">
+        <aside class="side">
+          <section class="panel"><h2>Daily brief</h2><div class="muted" id="briefText">Loading...</div><div class="chips" id="briefChips"></div></section>
+          <section class="panel"><h2>Alerts</h2><div class="muted" id="alertsText">Loading...</div><div class="chips" id="alertsList"></div></section>
+          <section class="panel"><h2>Source health</h2><div class="muted" id="sourcesText">Loading...</div><div class="chips" id="sourcesList"></div></section>
+          <section class="panel"><h2>API</h2><div class="chips"><a class="chip" href="/api/latest" target="_blank" rel="noreferrer">/api/latest</a><a class="chip" href="/api/sources" target="_blank" rel="noreferrer">/api/sources</a><a class="chip" href="/api/alerts" target="_blank" rel="noreferrer">/api/alerts</a><a class="chip" href="/api/brief/daily" target="_blank" rel="noreferrer">/api/brief/daily</a></div></section>
+        </aside>
+        <section class="grid" id="cards" aria-live="polite"></section>
+      </section>
+    </main>
 
     <script>
-      const statusEl = document.getElementById("status");
-      const cardsEl = document.getElementById("cards");
-      const searchEl = document.getElementById("search");
-      const btnReload = document.getElementById("btnReload");
+      const state = { items: [], stats: null, sources: [], alerts: [], brief: null };
+      const $ = (id) => document.getElementById(id);
+      const controls = ["search", "category", "risk", "country", "sector"].map($);
+      function text(v) { return String(v ?? ""); }
+      function unique(values) { return [...new Set(values.filter(Boolean))].sort(); }
+      function safeUrl(url) { return /^https?:\/\//i.test(text(url)) ? text(url) : ""; }
+      function clamp(s, n = 280) { s = text(s); return s.length > n ? s.slice(0, n).trimEnd() + "…" : s; }
+      function optionize(select, values, label) { select.replaceChildren(new Option(label, ""), ...values.map(v => new Option(v, v))); }
+      function chip(label, className = "chip") { const el = document.createElement("span"); el.className = className; el.textContent = label; return el; }
 
-      let allItems = [];
-
-      function toText(v) {
-        return String(v ?? "");
+      function renderStats() {
+        const stats = state.stats || {}; const high = (stats.by_risk_level?.Critical || 0) + (stats.by_risk_level?.High || 0);
+        const cards = [["Total items", stats.total_items || 0], ["Avg risk", stats.average_risk_score || 0], ["Alerts", state.alerts.length || 0], ["Failed feeds", state.sources.filter(s => s.failure_count > 0).length]];
+        $("stats").replaceChildren(...cards.map(([label, value]) => { const el = document.createElement("article"); el.className = "stat"; el.innerHTML = `<div class="label"></div><div class="value"></div>`; el.querySelector(".label").textContent = label; el.querySelector(".value").textContent = value; return el; }));
       }
 
-      function clampText(s, max = 360) {
-        s = toText(s).trim();
-        if (s.length <= max) return s;
-        return s.slice(0, max).trimEnd() + "…";
+      function renderSidePanels() {
+        const brief = state.brief || {}; $("briefText").textContent = brief.headline_summary || "No brief available yet.";
+        $("briefChips").replaceChildren(...[...(brief.countries_affected || []).slice(0, 4), ...(brief.sectors_affected || []).slice(0, 4)].map(v => chip(v)));
+        $("alertsText").textContent = state.alerts.length ? `${state.alerts.length} watchlist-matched Critical/High alerts.` : "No alert-ready watchlist matches.";
+        $("alertsList").replaceChildren(...state.alerts.slice(0, 5).map(a => chip(`${a.risk_level}: ${clamp(a.title, 42)}`, a.risk_level === "Critical" ? "chip bad" : "chip")));
+        const failures = state.sources.filter(s => s.failure_count > 0); $("sourcesText").textContent = `${state.sources.length} sources tracked · ${failures.length} with failures.`;
+        $("sourcesList").replaceChildren(...state.sources.slice(0, 8).map(s => chip(`${new URL(s.source_url).hostname}: ${s.failure_count ? s.failure_count + " failures" : "OK"}`, s.failure_count ? "chip bad" : "chip ok")));
       }
 
-      function safeUrl(url) {
-        url = toText(url).trim();
-        if (!url) return "";
-        // faqat http/https bo‘lsa link qilamiz
-        if (!/^https?:\/\//i.test(url)) return "";
-        return url;
-      }
-
-      function makeEl(tag, className, text) {
-        const el = document.createElement(tag);
-        if (className) el.className = className;
-        if (text !== undefined) el.textContent = text;
-        return el;
-      }
-
-      function render(items) {
-        cardsEl.replaceChildren();
-
-        if (!items || items.length === 0) {
-          const card = makeEl("div", "card");
-          card.appendChild(makeEl("h3", "", "No items"));
-          const meta = makeEl("div", "meta");
-          meta.appendChild(makeEl("span", "pill", "empty"));
-          card.appendChild(meta);
-          cardsEl.appendChild(card);
-          return;
-        }
-
+      function renderCards(items) {
+        const root = $("cards"); root.replaceChildren();
+        if (!items.length) { const empty = document.createElement("div"); empty.className = "empty panel"; empty.textContent = "No matching intelligence items. Try clearing filters or press Refresh."; root.appendChild(empty); return; }
         for (const it of items) {
-          const title = clampText(it.title, 120);
-          const summary = clampText(it.summary, 420);
-          const riskLevel = toText(it.risk_level);
-          const category = toText(it.category);
-          const riskScore = toText(it.risk_score);
-          const source = safeUrl(it.source);
-          const tags = Array.isArray(it.tags) ? it.tags.map(t => toText(t)).filter(Boolean) : [];
-
-          const card = makeEl("div", "card");
-
-          const h3 = makeEl("h3", "", title || "Untitled");
-          card.appendChild(h3);
-
-          const sum = makeEl("div", "summary", summary || "");
-          card.appendChild(sum);
-
-          const meta = makeEl("div", "meta");
-          meta.appendChild(makeEl("span", "pill", `Risk: ${riskLevel || "Unknown"} (${riskScore || "?"})`));
-          if (category) meta.appendChild(makeEl("span", "pill", category));
-
-          for (const t of tags.slice(0, 6)) {
-            meta.appendChild(makeEl("span", "pill", `#${t}`));
-          }
-          card.appendChild(meta);
-
-          if (source) {
-            const small = makeEl("div", "small");
-            small.appendChild(document.createTextNode("Source: "));
-            const a = document.createElement("a");
-            a.href = source;
-            a.target = "_blank";
-            a.rel = "noreferrer";
-            a.textContent = source;
-            small.appendChild(a);
-            card.appendChild(small);
-          }
-
-          cardsEl.appendChild(card);
+          const card = document.createElement("article"); card.className = "card"; const url = safeUrl(it.source_url); const tags = [...(it.tags || []), ...(it.affected_countries || []), ...(it.affected_sectors || [])];
+          card.innerHTML = `<div class="cardHeader"><h3></h3><div class="riskBadge ${text(it.risk_level)}"></div></div><div class="chips meta"></div><div class="summary"></div><div class="explain"><div><strong>Why it matters:</strong> <span class="why"></span></div><div><strong>Recommended action:</strong> <span class="action"></span></div><div><strong>Risk factors:</strong><ul class="factorList riskFactors"></ul></div></div><div class="source"></div>`;
+          card.querySelector("h3").textContent = clamp(it.title, 140); card.querySelector(".riskBadge").textContent = `${it.risk_level} ${it.risk_score}`; card.querySelector(".summary").textContent = clamp(it.summary, 420); card.querySelector(".why").textContent = it.why_it_matters || "Scored from source and rule-based signals."; card.querySelector(".action").textContent = it.recommended_action || "Monitor for updates.";
+          const meta = card.querySelector(".meta"); [it.category, `Confidence ${it.confidence_score}`].concat((it.watchlist_matches || []).map(m => `Watchlist: ${m.watchlist_name}`), unique(tags).slice(0, 8)).forEach(t => meta.appendChild(chip(t, "pill")));
+          const list = card.querySelector(".riskFactors"); (it.risk_factors || []).slice(0, 5).forEach(f => { const li = document.createElement("li"); li.textContent = f; list.appendChild(li); });
+          const source = card.querySelector(".source"); if (url) { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noreferrer"; a.textContent = it.source_domain || url; source.append("Source: ", a); } else { source.textContent = `Source: ${it.source_domain || "unknown"}`; }
+          root.appendChild(card);
         }
       }
 
-      function applySearch() {
-        const q = (searchEl.value || "").trim().toLowerCase();
-        if (!q) { render(allItems); return; }
-
-        const filtered = allItems.filter(it => {
-          const t = toText(it.title).toLowerCase();
-          const s = toText(it.summary).toLowerCase();
-          const tags = Array.isArray(it.tags) ? it.tags.join(" ").toLowerCase() : "";
-          return t.includes(q) || s.includes(q) || tags.includes(q);
-        });
-
-        render(filtered);
+      function applyFilters() {
+        const q = $("search").value.trim().toLowerCase(), category = $("category").value, risk = $("risk").value, country = $("country").value, sector = $("sector").value;
+        renderCards(state.items.filter(it => { const hay = [it.title, it.summary, ...(it.tags || []), ...(it.entities?.cves || []), ...(it.risk_factors || [])].join(" ").toLowerCase(); return (!q || hay.includes(q)) && (!category || it.category === category) && (!risk || it.risk_level === risk) && (!country || (it.affected_countries || []).includes(country)) && (!sector || (it.affected_sectors || []).includes(sector)); }));
       }
+      function hydrateFilters() { optionize($("category"), unique(state.items.map(i => i.category)), "All categories"); optionize($("risk"), ["Critical", "High", "Medium", "Low"].filter(r => state.items.some(i => i.risk_level === r)), "All risk levels"); optionize($("country"), unique(state.items.flatMap(i => i.affected_countries || [])), "All countries"); optionize($("sector"), unique(state.items.flatMap(i => i.affected_sectors || [])), "All sectors"); }
 
-      async function loadLatest() {
-        statusEl.textContent = "Status: fetching...";
-        statusEl.classList.remove("err");
-
+      async function load() {
+        $("status").textContent = "Status: loading..."; $("status").classList.remove("err");
         try {
-          const res = await fetch("/api/latest", { cache: "no-store" });
-          if (!res.ok) throw new Error("HTTP " + res.status);
-
-          const data = await res.json();
-          if (!Array.isArray(data)) throw new Error("API did not return an array");
-
-          allItems = data;
-          applySearch();
-          statusEl.textContent = `Status: OK (${data.length} items)`;
-        } catch (e) {
-          console.error(e);
-          statusEl.textContent = "Status: ERROR";
-          statusEl.classList.add("err");
-
-          cardsEl.replaceChildren();
-          const card = makeEl("div", "card");
-          const h3 = makeEl("h3", "err", "Failed to load");
-          card.appendChild(h3);
-          card.appendChild(makeEl("div", "summary", toText(e.message)));
-          cardsEl.appendChild(card);
-        }
+          const [itemsRes, statsRes, sourcesRes, alertsRes, briefRes] = await Promise.all([fetch("/api/items", { cache: "no-store" }), fetch("/api/stats", { cache: "no-store" }), fetch("/api/sources", { cache: "no-store" }), fetch("/api/alerts", { cache: "no-store" }), fetch("/api/brief/daily", { cache: "no-store" })]);
+          if (![itemsRes, statsRes, sourcesRes, alertsRes, briefRes].every(r => r.ok)) throw new Error("API request failed");
+          state.items = await itemsRes.json(); state.stats = await statsRes.json(); state.sources = await sourcesRes.json(); state.alerts = await alertsRes.json(); state.brief = await briefRes.json();
+          hydrateFilters(); renderStats(); renderSidePanels(); applyFilters(); $("status").textContent = `Status: OK · ${state.items.length} items`;
+        } catch (err) { console.error(err); $("status").textContent = `Status: ERROR · ${err.message}`; $("status").classList.add("err"); renderCards([]); }
       }
-
-      btnReload.addEventListener("click", loadLatest);
-      searchEl.addEventListener("input", applySearch);
-      loadLatest();
+      $("refresh").addEventListener("click", async () => { const button = $("refresh"); button.disabled = true; button.textContent = "Refreshing..."; try { await fetch("/api/refresh", { method: "POST" }); } finally { button.disabled = false; button.textContent = "Refresh"; load(); } });
+      controls.forEach(control => control.addEventListener("input", applyFilters)); load();
     </script>
   </body>
 </html>
