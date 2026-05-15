@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .config import settings
+
 
 class WatchlistMatchOut(BaseModel):
     watchlist_id: str
@@ -37,7 +39,7 @@ class IntelligenceItemOut(BaseModel):
 
 class WatchlistCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
-    org_id: str = Field(default="demo", min_length=1, max_length=80)
+    org_id: str = Field(default_factory=lambda: settings.default_org, min_length=1, max_length=80)
     countries: list[str] = Field(default_factory=list)
     sectors: list[str] = Field(default_factory=list)
     organizations: list[str] = Field(default_factory=list)

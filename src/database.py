@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,15 @@ _WATCHLISTS: list[Watchlist] = []
 _SOURCE_HEALTH: dict[str, SourceHealth] = {}
 _ALERTS: list[Alert] = []
 _LOCK = asyncio.Lock()
+
+
+@dataclass
+class AlertSaveResult:
+    created_count: int
+    existing_count: int
+    all_alerts: list[Alert]
+    created_alerts: list[Alert]
+
 
 
 def _psycopg():
@@ -543,18 +553,17 @@ async def get_alert(alert_id: str) -> Alert | None:
     return None
 
 
-async def save_alerts(alerts: list[Alert]) -> list[Alert]:
+async def save_alerts_with_counts(alerts: list[Alert]) -> AlertSaveResult:
     if not alerts:
-        return []
-    async with _LOCK:
-        existing_keys = {(a.item_id, a.matched_watchlist_id, a.reason) for a in _ALERTS}
-        for alert in alerts:
-            key = (alert.item_id, alert.matched_watchlist_id, alert.reason)
-            if key not in existing_keys:
-                _ALERTS.append(alert)
-                existing_keys.add(key)
+        all_alerts = await list_alerts()
+        return AlertSaveResult(created_count=0, existing_count=0, all_alerts=all_alerts, created_alerts=[])
+
+    created_alerts: list[Alert] = []
+    existing_count = 0
+
     if database_enabled():
-        def run() -> None:
+        def run() -> list[Alert]:
+            inserted: list[Alert] = []
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
                     for alert in alerts:
@@ -563,13 +572,42 @@ async def save_alerts(alerts: list[Alert]) -> list[Alert]:
                             INSERT INTO alerts (id, item_id, title, risk_level, matched_watchlist_id, matched_watchlist_name,
                                 reason, recommended_action, status, created_at, updated_at, notes, org_id)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (item_id, matched_watchlist_id, reason) DO NOTHING;
+                            ON CONFLICT (item_id, matched_watchlist_id, reason) DO NOTHING
+                            RETURNING id, item_id, title, risk_level, matched_watchlist_id, matched_watchlist_name, reason,
+                                      recommended_action, status, created_at, updated_at, notes, org_id;
                             """,
                             (alert.id, alert.item_id, alert.title, alert.risk_level, alert.matched_watchlist_id, alert.matched_watchlist_name, alert.reason, alert.recommended_action, alert.status, alert.created_at, alert.updated_at, alert.notes, alert.org_id),
                         )
+                        row = cur.fetchone()
+                        if row:
+                            inserted.append(_alert_from_row(row))
                 conn.commit()
-        await asyncio.to_thread(run)
-    return await list_alerts()
+            return inserted
+
+        created_alerts = await asyncio.to_thread(run)
+        existing_count = len(alerts) - len(created_alerts)
+        all_alerts = await list_alerts()
+        return AlertSaveResult(created_count=len(created_alerts), existing_count=existing_count, all_alerts=all_alerts, created_alerts=created_alerts)
+
+    async with _LOCK:
+        existing_keys = {(a.item_id, a.matched_watchlist_id, a.reason) for a in _ALERTS}
+        for alert in alerts:
+            key = (alert.item_id, alert.matched_watchlist_id, alert.reason)
+            if key in existing_keys:
+                existing_count += 1
+                continue
+            _ALERTS.append(alert)
+            created_alerts.append(alert)
+            existing_keys.add(key)
+        all_alerts = list(_ALERTS)
+    return AlertSaveResult(created_count=len(created_alerts), existing_count=existing_count, all_alerts=all_alerts, created_alerts=created_alerts)
+
+
+async def save_alerts(alerts: list[Alert]) -> list[Alert]:
+    if not alerts:
+        return []
+    result = await save_alerts_with_counts(alerts)
+    return result.all_alerts
 
 
 async def update_alert(alert_id: str, *, status: str | None = None, notes: str | None = None, updated_at: str) -> Alert | None:

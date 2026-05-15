@@ -59,9 +59,9 @@
       <header class="hero">
         <div>
           <h1>{{ app_name }}</h1>
-          <p class="subtitle">Usable first pilot operator product for explainable cyber-geopolitical intelligence. Tracks RSS sources, watchlist matches, risk drivers, persistent alert workflow, and a daily brief.</p>
+          <p class="subtitle">Single-org pilot deployment product for explainable cyber-geopolitical intelligence. Tracks RSS sources, watchlist matches, risk drivers, persistent alert workflow, and a daily brief.</p>
         </div>
-        <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div class="muted">v{{ version }}</div></div>
+        <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div></div>
       </header>
 
       <section class="stats">
@@ -84,6 +84,12 @@
         <section class="cards" id="cards"></section>
         <aside class="sidebar">
           <section class="panel">
+            <h2>Org context</h2>
+            <label class="muted" for="activeOrg">Active org_id</label>
+            <input id="activeOrg" value="{{ default_org }}" placeholder="Active org_id" />
+            <p class="muted">Stored in sessionStorage. Dashboard reads use this org_id.</p>
+          </section>
+          <section class="panel">
             <h2>Admin API key</h2>
             <input id="adminKey" type="password" autocomplete="off" placeholder="X-Polaris-API-Key for write actions" />
             <p class="muted">Stored only in sessionStorage for this browser tab. Leave empty only when demo writes are unprotected.</p>
@@ -98,7 +104,7 @@
             <h2>Watchlists</h2>
             <div class="form-grid">
               <input id="wlName" placeholder="Name" />
-              <input id="wlOrg" placeholder="org_id" value="demo" />
+              <input id="wlOrg" placeholder="org_id" value="{{ default_org }}" />
               <input id="wlCountries" placeholder="Countries, comma-separated" />
               <input id="wlSectors" placeholder="Sectors, comma-separated" />
               <input id="wlKeywords" placeholder="Keywords, comma-separated" />
@@ -111,6 +117,17 @@
           </section>
           <section class="panel">
             <h2>Alerts</h2>
+            <button id="generateAlerts">Generate persistent alerts</button>
+            <div id="alertNotice" class="notice"></div>
+            <div class="form-grid section">
+              <select id="alertStatus"><option value="all">All statuses</option><option value="open">Open</option><option value="acknowledged">Acknowledged</option><option value="resolved">Resolved</option></select>
+              <select id="alertType"><option value="all">All alert types</option><option value="persisted">Persisted</option><option value="preview">Preview</option></select>
+              <input id="alertSearch" placeholder="Search alerts" />
+            </div>
+            <div id="telegramPreviewPanel" class="section" style="display:none">
+              <label class="muted" for="telegramPreviewText">Telegram preview only — no message sent</label>
+              <textarea id="telegramPreviewText" readonly></textarea>
+            </div>
             <div id="alerts" class="list"></div>
           </section>
           <section class="panel">
@@ -123,17 +140,24 @@
 
     <script>
       const $ = (id) => document.getElementById(id);
-      const state = { items: [], stats: {}, alerts: { persisted: [], generated_preview: [] }, sources: [], brief: {}, watchlists: [] };
+      const state = { items: [], stats: {}, alerts: { persisted: [], generated_preview: [] }, sources: [], brief: {}, watchlists: [], activeOrg: "{{ default_org }}" };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
+      const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
       const opt = (value) => { const o = document.createElement("option"); o.value = value; o.textContent = value; return o; };
       const chip = (text, cls = "chip") => { const el = document.createElement("span"); el.className = cls; el.textContent = text; return el; };
       const csv = (value) => value.split(",").map(v => v.trim()).filter(Boolean);
       function safeHttpUrl(value) { try { const url = new URL(value || ""); return ["http:", "https:"].includes(url.protocol) ? url.href : null; } catch (_) { return null; } }
       function adminHeaders() { const key = sessionStorage.getItem("polarisAdminApiKey") || ""; return key ? { "X-Polaris-API-Key": key } : {}; }
+      function activeOrg() { return (sessionStorage.getItem("polarisActiveOrg") || state.activeOrg || "{{ default_org }}").trim() || "{{ default_org }}"; }
+      function orgQuery() { return `org_id=${encodeURIComponent(activeOrg())}`; }
       function setNotice(id, message, ok = false) { const el = $(id); el.textContent = message || ""; el.className = `notice ${message ? (ok ? "ok" : "err") : ""}`; }
       $("adminKey").value = sessionStorage.getItem("polarisAdminApiKey") || "";
       $("adminKey").addEventListener("input", (event) => { sessionStorage.setItem("polarisAdminApiKey", event.target.value); setNotice("authNotice", event.target.value ? "Admin API key saved for this tab." : "", true); });
+      $("activeOrg").value = activeOrg();
+      $("activeOrgLabel").textContent = activeOrg();
+      $("wlOrg").value = activeOrg();
+      $("activeOrg").addEventListener("change", async (event) => { const next = event.target.value.trim() || "{{ default_org }}"; sessionStorage.setItem("polarisActiveOrg", next); state.activeOrg = next; $("activeOrgLabel").textContent = next; $("wlOrg").value = next; await load(); });
 
       function hydrateFilters() {
         const risks = uniq(state.items.map(i => i.risk_level));
@@ -148,9 +172,10 @@
       }
 
       function renderStats() {
-        $("totalItems").textContent = state.stats.total_items ?? state.items.length;
-        $("avgRisk").textContent = state.stats.average_risk_score ?? "—";
-        const byRisk = state.stats.by_risk_level || {};
+        const byRisk = state.items.reduce((acc, item) => { acc[item.risk_level] = (acc[item.risk_level] || 0) + 1; return acc; }, {});
+        const avg = state.items.length ? (state.items.reduce((sum, item) => sum + (item.risk_score || 0), 0) / state.items.length).toFixed(1) : "0";
+        $("totalItems").textContent = state.items.length;
+        $("avgRisk").textContent = avg;
         $("highCount").textContent = (byRisk.Critical || 0) + (byRisk.High || 0);
         $("alertCount").textContent = state.alerts.total_persisted ?? (state.alerts.persisted || []).length;
       }
@@ -174,19 +199,57 @@
         $("cards").replaceChildren(...cards);
       }
 
+      function editInput(value, placeholder) {
+        const input = document.createElement("input"); input.value = (value || []).join(", "); input.placeholder = placeholder; return input;
+      }
+
+      function renderWatchlistEdit(el, wl) {
+        const name = document.createElement("input"); name.value = wl.name || ""; name.placeholder = "Name";
+        const org = document.createElement("input"); org.value = wl.org_id || activeOrg(); org.placeholder = "org_id";
+        const countries = editInput(wl.countries, "Countries, comma-separated");
+        const sectors = editInput(wl.sectors, "Sectors, comma-separated");
+        const keywords = editInput(wl.keywords, "Keywords, comma-separated");
+        const cves = editInput(wl.cves, "CVEs, comma-separated");
+        const actors = editInput(wl.threat_actors, "Threat actors, comma-separated");
+        const save = document.createElement("button"); save.textContent = "Save watchlist"; save.addEventListener("click", () => updateWatchlist(wl.id, { name: name.value.trim(), org_id: org.value.trim() || wl.org_id || activeOrg(), countries: csv(countries.value), sectors: csv(sectors.value), organizations: wl.organizations || [], keywords: csv(keywords.value), cves: csv(cves.value), threat_actors: csv(actors.value) }));
+        const cancel = document.createElement("button"); cancel.textContent = "Cancel edit"; cancel.addEventListener("click", renderWatchlists);
+        const grid = document.createElement("div"); grid.className = "form-grid section"; grid.append(name, org, countries, sectors, keywords, cves, actors, save, cancel);
+        el.replaceChildren(grid);
+      }
+
       function renderWatchlists() {
         $("watchlists").replaceChildren(...(state.watchlists.length ? state.watchlists.map(wl => {
           const el = document.createElement("div"); el.className = "mini";
           const strong = document.createElement("strong"); strong.textContent = `${wl.name} · ${wl.org_id}`;
           const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = [...(wl.countries || []), ...(wl.sectors || []), ...(wl.keywords || []), ...(wl.cves || []), ...(wl.threat_actors || [])].join(", ") || "No criteria";
+          const edit = document.createElement("button"); edit.className = "section"; edit.textContent = "Edit"; edit.setAttribute("data-watchlist-edit", wl.id); edit.addEventListener("click", () => renderWatchlistEdit(el, wl));
           const del = document.createElement("button"); del.className = "danger section"; del.textContent = "Delete"; del.addEventListener("click", () => deleteWatchlist(wl.id));
-          el.append(strong, muted, del); return el;
-        }) : [chip("No watchlists yet")]);
+          const actions = document.createElement("div"); actions.className = "form-grid"; actions.append(edit, del);
+          el.append(strong, muted, actions); return el;
+        }) : [chip("No watchlists yet")]));
+      }
+
+      function alertText(alert) { return `${alert.title || ""} ${alert.reason || ""} ${alert.matched_watchlist_name || alert.matched_watchlist || ""}`.toLowerCase(); }
+      function alertMatchesFilters(alert, kind) {
+        const status = $("alertStatus").value;
+        const type = $("alertType").value;
+        const q = $("alertSearch").value.toLowerCase().trim();
+        return (type === "all" || type === kind) && (kind === "preview" || status === "all" || (alert.status || "open") === status) && (!q || alertText(alert).includes(q));
+      }
+      function previewCard(alert) {
+        const el = document.createElement("div"); el.className = "mini";
+        const label = chip("Preview — not persisted", "badge watch");
+        const strong = document.createElement("strong"); strong.textContent = `${alert.risk_level}: ${alert.title || "Untitled alert"}`;
+        const wl = document.createElement("div"); wl.className = "muted"; wl.textContent = `Matched watchlist: ${alert.matched_watchlist_name || alert.matched_watchlist || "Unknown"}`;
+        const reason = document.createElement("div"); reason.className = "muted"; reason.textContent = `Reason: ${alert.reason || "No reason provided"}`;
+        const action = document.createElement("div"); action.className = "muted"; action.textContent = `Recommended action: ${alert.recommended_action || "Review."}`;
+        const hint = document.createElement("div"); hint.className = "muted section"; hint.textContent = "Click Generate persistent alerts to persist this preview.";
+        el.append(label, strong, wl, reason, action, hint); return el;
       }
 
       function renderAlerts() {
-        const persisted = state.alerts.persisted || [];
-        const previews = state.alerts.generated_preview || [];
+        const persisted = (state.alerts.persisted || []).filter(alert => alertMatchesFilters(alert, "persisted"));
+        const previews = (state.alerts.generated_preview || []).filter(alert => alertMatchesFilters(alert, "preview"));
         const nodes = [];
         persisted.slice(0, 8).forEach(alert => {
           const el = document.createElement("div"); el.className = "mini";
@@ -197,10 +260,14 @@
           const ack = document.createElement("button"); ack.textContent = "Acknowledge"; ack.addEventListener("click", () => patchAlert(alert.id, { status: "acknowledged", notes: notes.value }));
           const resolve = document.createElement("button"); resolve.textContent = "Resolve"; resolve.addEventListener("click", () => patchAlert(alert.id, { status: "resolved", notes: notes.value }));
           const save = document.createElement("button"); save.textContent = "Save notes"; save.addEventListener("click", () => patchAlert(alert.id, { notes: notes.value }));
-          const actions = document.createElement("div"); actions.className = "form-grid section"; actions.append(ack, resolve, save);
+          const telegram = document.createElement("button"); telegram.textContent = "Telegram preview"; telegram.setAttribute("data-telegram-preview", alert.id); telegram.addEventListener("click", () => telegramPreview(alert.id));
+          const actions = document.createElement("div"); actions.className = "form-grid section"; actions.append(ack, resolve, save, telegram);
           el.append(strong, status, muted, notes, actions); nodes.push(el);
         });
-        if (!persisted.length && previews.length) nodes.push(chip(`${previews.length} generated alert previews available. Use POST /api/alerts/generate to persist them.`));
+        if (previews.length) {
+          nodes.push(chip(`${previews.length} generated alert previews. Click Generate persistent alerts to persist them.`));
+          previews.slice(0, 8).forEach(alert => nodes.push(previewCard(alert)));
+        }
         if (!nodes.length) nodes.push(chip("No alert-ready watchlist matches"));
         $("alerts").replaceChildren(...nodes);
       }
@@ -228,12 +295,15 @@
 
       async function load() {
         try {
-          const [itemsRes, statsRes, alertsRes, sourcesRes, briefRes, watchlistsRes] = await Promise.all([
-            fetch("/api/items", { cache: "no-store" }), fetch("/api/stats", { cache: "no-store" }), fetch("/api/alerts", { cache: "no-store" }), fetch("/api/sources", { cache: "no-store" }), fetch("/api/brief/daily", { cache: "no-store" }), fetch("/api/watchlists", { cache: "no-store" })
+          state.activeOrg = activeOrg(); $("activeOrgLabel").textContent = state.activeOrg; $("wlOrg").value = $("wlOrg").value.trim() || state.activeOrg;
+          const headers = adminHeaders();
+          const [itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes] = await Promise.all([
+            fetch(`/api/items?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/alerts?${orgQuery()}`, { cache: "no-store", headers }), fetch("/api/sources", { cache: "no-store", headers }), fetch(`/api/brief/daily?${orgQuery()}`, { cache: "no-store", headers }), fetch(`/api/watchlists?${orgQuery()}`, { cache: "no-store", headers })
           ]);
-          if (![itemsRes, statsRes, alertsRes, sourcesRes, briefRes, watchlistsRes].every(r => r.ok)) throw new Error("API request failed");
-          state.items = await itemsRes.json(); state.stats = await statsRes.json(); state.alerts = await alertsRes.json(); state.sources = await sourcesRes.json(); state.brief = await briefRes.json(); state.watchlists = await watchlistsRes.json();
-          hydrateFilters(); renderStats(); renderSidebars(); applyFilters(); $("status").textContent = `Status: OK · ${state.items.length} items`; $("status").classList.remove("err");
+          if ([itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes].some(r => r.status === 401)) throw new Error("Read blocked: invalid or missing API key.");
+          if (![itemsRes, alertsRes, sourcesRes, briefRes, watchlistsRes].every(r => r.ok)) throw new Error("API request failed");
+          state.items = await itemsRes.json(); state.alerts = await alertsRes.json(); state.sources = await sourcesRes.json(); state.brief = await briefRes.json(); state.watchlists = await watchlistsRes.json();
+          hydrateFilters(); renderStats(); renderSidebars(); applyFilters(); $("status").textContent = `Status: OK · ${state.activeOrg} · ${state.items.length} items`; $("status").classList.remove("err");
         } catch (err) { $("status").textContent = `Status: ERROR · ${err.message}`; $("status").classList.add("err"); renderCards([]); }
       }
 
@@ -250,13 +320,49 @@
 
       async function createWatchlist() {
         setNotice("watchlistNotice", "");
-        const payload = { name: $("wlName").value.trim(), org_id: $("wlOrg").value.trim() || "demo", countries: csv($("wlCountries").value), sectors: csv($("wlSectors").value), organizations: [], keywords: csv($("wlKeywords").value), cves: csv($("wlCves").value), threat_actors: csv($("wlActors").value) };
+        const payload = { name: $("wlName").value.trim(), org_id: $("wlOrg").value.trim() || activeOrg(), countries: csv($("wlCountries").value), sectors: csv($("wlSectors").value), organizations: [], keywords: csv($("wlKeywords").value), cves: csv($("wlCves").value), threat_actors: csv($("wlActors").value) };
         try {
           const res = await fetch("/api/watchlists", { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
           if (res.status === 401) { setNotice("watchlistNotice", "Write blocked: invalid or missing API key."); return; }
           if (!res.ok) throw new Error("Watchlist create failed");
           ["wlName", "wlCountries", "wlSectors", "wlKeywords", "wlCves", "wlActors"].forEach(id => $(id).value = ""); setNotice("watchlistNotice", "Watchlist created.", true); await load();
         } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist create failed"); }
+      }
+
+
+      async function updateWatchlist(id, payload) {
+        setNotice("watchlistNotice", "");
+        try {
+          const res = await fetch(`/api/watchlists/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
+          if (res.status === 401) { setNotice("watchlistNotice", "Watchlist update blocked: invalid or missing API key."); return; }
+          if (!res.ok) throw new Error("Watchlist update failed");
+          setNotice("watchlistNotice", "Watchlist updated.", true); await load();
+        } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist update failed"); }
+      }
+
+      async function generateAlerts() {
+        const b = $("generateAlerts"); b.disabled = true; setNotice("alertNotice", "");
+        try {
+          const res = await fetch(`/api/alerts/generate?${orgQuery()}`, { method: "POST", headers: adminHeaders() });
+          if (res.status === 401) { setNotice("alertNotice", "Alert generation blocked: invalid or missing API key."); return; }
+          if (!res.ok) throw new Error("Alert generation failed");
+          const payload = await res.json();
+          setNotice("alertNotice", `Created ${payload.created || 0} alerts, ${payload.existing || 0} already existed.`, true);
+          await load();
+        } catch (err) { setNotice("alertNotice", err.message || "Alert generation failed"); }
+        finally { b.disabled = false; }
+      }
+
+      async function telegramPreview(id) {
+        setNotice("alertNotice", "");
+        try {
+          const res = await fetch(`/api/alerts/${id}/telegram-preview`, { method: "POST", headers: adminHeaders() });
+          if (res.status === 401) { setNotice("alertNotice", "Telegram preview blocked: invalid or missing API key."); return; }
+          if (!res.ok) throw new Error("Telegram preview failed");
+          const payload = await res.json();
+          $("telegramPreviewText").value = payload.message || "";
+          $("telegramPreviewPanel").style.display = "block";
+        } catch (err) { setNotice("alertNotice", err.message || "Telegram preview failed"); }
       }
 
       async function deleteWatchlist(id) {
@@ -277,7 +383,9 @@
 
       $("refresh").addEventListener("click", refreshNow);
       $("createWatchlist").addEventListener("click", createWatchlist);
+      $("generateAlerts").addEventListener("click", generateAlerts);
       controls.forEach(control => control.addEventListener("input", applyFilters));
+      alertControls.forEach(control => control.addEventListener("input", renderAlerts));
       load();
     </script>
   </body>

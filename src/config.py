@@ -46,6 +46,10 @@ def _csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "POLARIS Intel"
@@ -53,6 +57,8 @@ class Settings:
     port: int = int(os.getenv("PORT", "8000"))
     database_url: str = os.getenv("DATABASE_URL", "").strip()
     api_key: str = os.getenv("POLARIS_API_KEY", "").strip()
+    protect_reads: bool = _bool(os.getenv("POLARIS_PROTECT_READS", "false"))
+    default_org: str = os.getenv("POLARIS_DEFAULT_ORG", "demo").strip() or "demo"
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     max_items: int = int(os.getenv("MAX_ITEMS", "60"))
