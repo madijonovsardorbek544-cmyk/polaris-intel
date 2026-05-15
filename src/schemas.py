@@ -3,6 +3,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class WatchlistMatchOut(BaseModel):
+    watchlist_id: str
+    watchlist_name: str
+    matched_on: str
+    matched_value: str
+    reason: str
+
+
 class IntelligenceItemOut(BaseModel):
     id: str
     title: str
@@ -21,6 +29,9 @@ class IntelligenceItemOut(BaseModel):
     recommended_action: str
     created_at: str
     ingested_at: str
+    risk_factors: list[str] = Field(default_factory=list)
+    confidence_factors: list[str] = Field(default_factory=list)
+    watchlist_matches: list[WatchlistMatchOut] = Field(default_factory=list)
 
 
 class WatchlistCreate(BaseModel):
@@ -35,4 +46,22 @@ class WatchlistCreate(BaseModel):
 
 class WatchlistOut(WatchlistCreate):
     id: str
+    created_at: str
+
+
+class SourceHealthOut(BaseModel):
+    source_url: str
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    failure_count: int = 0
+    last_error: str | None = None
+
+
+class AlertOut(BaseModel):
+    item_id: str
+    title: str
+    risk_level: str
+    matched_watchlist: str
+    reason: str
+    recommended_action: str
     created_at: str

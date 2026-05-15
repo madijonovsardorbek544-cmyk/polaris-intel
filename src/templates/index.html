@@ -5,249 +5,195 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ app_name }}</title>
     <style>
-      :root {
-        color-scheme: dark;
-        --bg: #060b16;
-        --panel: rgba(255, 255, 255, 0.055);
-        --panel-2: rgba(255, 255, 255, 0.085);
-        --line: rgba(255, 255, 255, 0.12);
-        --text: rgba(255, 255, 255, 0.94);
-        --muted: rgba(255, 255, 255, 0.68);
-        --accent: #8ab4ff;
-        --critical: #ff5f6d;
-        --high: #ff9f68;
-        --medium: #ffd166;
-        --low: #8ecae6;
-      }
+      :root { color-scheme: dark; --bg:#060b16; --panel:rgba(255,255,255,.06); --panel2:rgba(255,255,255,.09); --line:rgba(255,255,255,.13); --text:rgba(255,255,255,.94); --muted:rgba(255,255,255,.68); --accent:#8ab4ff; --critical:#ff5f6d; --high:#ff9f68; --medium:#ffd166; --low:#8ecae6; --ok:#7ae582; }
       * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-        color: var(--text);
-        background:
-          radial-gradient(900px 520px at 20% -10%, rgba(63, 112, 218, .35), transparent 60%),
-          radial-gradient(760px 460px at 100% 0%, rgba(255, 95, 109, .12), transparent 55%),
-          linear-gradient(180deg, #050913, #08111f 58%, #050913);
-      }
-      a { color: var(--accent); text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .shell { width: min(1380px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 48px; }
-      .hero { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end; margin-bottom: 18px; }
-      h1 { margin: 0; font-size: clamp(34px, 7vw, 76px); letter-spacing: -.045em; line-height: .94; }
-      .subtitle { color: var(--muted); max-width: 760px; margin-top: 10px; line-height: 1.55; }
-      .status { border: 1px solid var(--line); background: var(--panel); border-radius: 18px; padding: 14px 16px; color: var(--muted); min-width: 220px; }
-      .toolbar { display: grid; grid-template-columns: 1.5fr repeat(4, minmax(130px, .5fr)) auto; gap: 10px; margin: 18px 0; }
-      input, select, button {
-        border: 1px solid var(--line); border-radius: 14px; padding: 12px 13px; color: var(--text); background: rgba(255,255,255,.055); outline: none;
-      }
-      input:focus, select:focus { border-color: rgba(138,180,255,.5); }
-      button { cursor: pointer; font-weight: 800; background: rgba(138,180,255,.14); border-color: rgba(138,180,255,.28); }
-      button:hover { background: rgba(138,180,255,.22); }
-      button:disabled { opacity: .65; cursor: wait; }
-      .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0 20px; }
-      .stat { border: 1px solid var(--line); background: var(--panel); border-radius: 20px; padding: 16px; }
-      .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-      .stat .value { font-size: 30px; font-weight: 900; margin-top: 6px; }
-      .content { display: grid; grid-template-columns: 310px 1fr; gap: 16px; align-items: start; }
-      .side, .card { border: 1px solid var(--line); background: linear-gradient(180deg, var(--panel-2), var(--panel)); border-radius: 22px; box-shadow: 0 22px 60px rgba(0,0,0,.25); }
-      .side { padding: 16px; position: sticky; top: 16px; }
-      .side h2 { font-size: 16px; margin: 0 0 10px; }
-      .summaryText { color: var(--muted); line-height: 1.55; font-size: 14px; }
-      .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-      .chip, .pill { border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--muted); padding: 6px 9px; border-radius: 999px; font-size: 12px; }
-      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-      .card { padding: 18px; display: flex; flex-direction: column; gap: 12px; min-height: 330px; }
-      .cardHeader { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
-      .card h3 { margin: 0; line-height: 1.3; font-size: 17px; }
-      .riskBadge { flex: 0 0 auto; font-weight: 900; border-radius: 14px; padding: 8px 10px; border: 1px solid var(--line); }
-      .riskBadge.Critical { color: #ffd6db; background: rgba(255,95,109,.16); border-color: rgba(255,95,109,.45); }
-      .riskBadge.High { color: #ffe1d1; background: rgba(255,159,104,.14); border-color: rgba(255,159,104,.45); }
-      .riskBadge.Medium { color: #fff0bf; background: rgba(255,209,102,.12); border-color: rgba(255,209,102,.42); }
-      .riskBadge.Low { color: #d7f2ff; background: rgba(142,202,230,.12); border-color: rgba(142,202,230,.4); }
-      .summary { color: rgba(255,255,255,.8); line-height: 1.55; font-size: 14px; }
-      .explain { display: grid; gap: 8px; margin-top: auto; }
-      .explain div { border-left: 3px solid rgba(138,180,255,.45); padding-left: 10px; color: var(--muted); line-height: 1.45; font-size: 13px; }
-      .source { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
-      .empty { grid-column: 1 / -1; padding: 28px; text-align: center; color: var(--muted); }
-      .err { color: #ffb3b3; }
-      @media (max-width: 1060px) {
-        .toolbar { grid-template-columns: 1fr 1fr; }
-        .content { grid-template-columns: 1fr; }
-        .side { position: static; }
-      }
-      @media (max-width: 760px) {
-        .shell { width: min(100% - 22px, 1380px); padding-top: 18px; }
-        .hero, .stats, .grid, .toolbar { grid-template-columns: 1fr; }
-        .status { min-width: unset; }
-      }
+      body { margin:0; min-height:100vh; font-family:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--text); background:radial-gradient(900px 520px at 20% -10%, rgba(63,112,218,.35), transparent 60%), linear-gradient(180deg,#050913,#08111f 58%,#050913); }
+      a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+      .shell { width:min(1440px, calc(100% - 32px)); margin:0 auto; padding:28px 0 48px; }
+      .hero { display:grid; grid-template-columns:1fr auto; gap:16px; align-items:end; margin-bottom:18px; }
+      h1 { margin:0; font-size:clamp(34px, 7vw, 76px); letter-spacing:-.045em; line-height:.94; }
+      h2 { margin:0 0 12px; font-size:18px; }
+      h3 { margin:0; font-size:17px; }
+      .subtitle { color:var(--muted); max-width:800px; margin-top:10px; line-height:1.55; }
+      .status, .panel, .card { border:1px solid var(--line); background:var(--panel); border-radius:18px; box-shadow:0 12px 44px rgba(0,0,0,.18); }
+      .status { padding:14px 16px; color:var(--muted); min-width:240px; }
+      .layout { display:grid; grid-template-columns: minmax(0, 1fr) 360px; gap:14px; align-items:start; }
+      .toolbar { display:grid; grid-template-columns:1.4fr repeat(4, minmax(120px,.5fr)) auto; gap:10px; margin:18px 0; }
+      input, select, button { border:1px solid var(--line); border-radius:14px; padding:12px 13px; color:var(--text); background:rgba(255,255,255,.055); outline:none; }
+      button { cursor:pointer; font-weight:800; background:rgba(138,180,255,.14); border-color:rgba(138,180,255,.28); }
+      button:hover { background:rgba(138,180,255,.22); } button:disabled { opacity:.65; cursor:wait; }
+      .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:16px 0 20px; }
+      .stat { padding:16px; border:1px solid var(--line); background:var(--panel); border-radius:18px; }
+      .stat strong { display:block; font-size:30px; letter-spacing:-.03em; } .stat span, .muted { color:var(--muted); font-size:13px; }
+      .cards { display:grid; gap:12px; }
+      .card { padding:18px; }
+      .meta { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0; }
+      .pill, .chip, .badge { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; padding:5px 9px; font-size:12px; color:var(--muted); background:rgba(255,255,255,.055); }
+      .risk-Critical { color:white; background:rgba(255,95,109,.22); border-color:rgba(255,95,109,.45); }
+      .risk-High { color:white; background:rgba(255,159,104,.20); border-color:rgba(255,159,104,.45); }
+      .risk-Medium { color:white; background:rgba(255,209,102,.16); border-color:rgba(255,209,102,.40); }
+      .risk-Low { color:white; background:rgba(142,202,230,.16); border-color:rgba(142,202,230,.35); }
+      .summary { color:var(--muted); line-height:1.55; }
+      .section { margin-top:12px; }
+      .factor-list { display:flex; flex-wrap:wrap; gap:7px; margin-top:8px; }
+      .badge.watch { color:#d7f8ff; border-color:rgba(138,180,255,.45); background:rgba(138,180,255,.15); }
+      .sidebar { display:grid; gap:14px; position:sticky; top:16px; }
+      .panel { padding:16px; }
+      .list { display:grid; gap:10px; }
+      .mini { padding:10px; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,.04); }
+      .mini strong { display:block; font-size:13px; margin-bottom:4px; }
+      .err { color:var(--critical); } .ok { color:var(--ok); }
+      @media (max-width: 1050px) { .layout, .hero { grid-template-columns:1fr; } .sidebar { position:static; } .toolbar { grid-template-columns:1fr 1fr; } .stats { grid-template-columns:1fr 1fr; } }
+      @media (max-width: 640px) { .toolbar, .stats { grid-template-columns:1fr; } }
     </style>
   </head>
   <body>
     <main class="shell">
-      <section class="hero">
+      <header class="hero">
         <div>
           <h1>{{ app_name }}</h1>
-          <div class="subtitle">Explainable cyber-geopolitical risk intelligence from RSS sources, rule-based entity extraction, transparent scoring, and watchlist relevance.</div>
+          <p class="subtitle">Explainable cyber-geopolitical intelligence dashboard for paid pilot validation. Tracks RSS sources, watchlist matches, risk drivers, alert-ready items, and a daily brief.</p>
         </div>
-        <div class="status" id="status">Status: {{ status }} · {{ items_count }} items · v{{ version }}</div>
+        <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div class="muted">v{{ version }}</div></div>
+      </header>
+
+      <section class="stats">
+        <div class="stat"><strong id="totalItems">—</strong><span>Items</span></div>
+        <div class="stat"><strong id="avgRisk">—</strong><span>Avg risk</span></div>
+        <div class="stat"><strong id="highCount">—</strong><span>Critical/High</span></div>
+        <div class="stat"><strong id="alertCount">—</strong><span>Alerts</span></div>
       </section>
 
-      <section class="toolbar" aria-label="Filters">
-        <input id="search" type="search" placeholder="Search title, summary, tags, CVEs..." />
+      <div class="toolbar">
+        <input id="q" placeholder="Search title, summary, tags" />
+        <select id="risk"><option value="">All risk</option></select>
         <select id="category"><option value="">All categories</option></select>
-        <select id="risk"><option value="">All risk levels</option></select>
         <select id="country"><option value="">All countries</option></select>
         <select id="sector"><option value="">All sectors</option></select>
-        <button id="refresh" type="button">Refresh</button>
-      </section>
+        <button id="refresh">Refresh</button>
+      </div>
 
-      <section class="stats" id="stats"></section>
-
-      <section class="content">
-        <aside class="side">
-          <h2>Executive summary</h2>
-          <div class="summaryText" id="summaryText">Loading summary...</div>
-          <div class="chips" id="focusChips"></div>
-          <div class="chips">
-            <a class="chip" href="/api/latest" target="_blank" rel="noreferrer">/api/latest</a>
-            <a class="chip" href="/api/stats" target="_blank" rel="noreferrer">/api/stats</a>
-            <a class="chip" href="/health" target="_blank" rel="noreferrer">/health</a>
-          </div>
+      <div class="layout">
+        <section class="cards" id="cards"></section>
+        <aside class="sidebar">
+          <section class="panel">
+            <h2>Daily brief</h2>
+            <p id="briefHeadline" class="summary">Loading brief…</p>
+            <div id="briefActions" class="factor-list"></div>
+          </section>
+          <section class="panel">
+            <h2>Alerts</h2>
+            <div id="alerts" class="list"></div>
+          </section>
+          <section class="panel">
+            <h2>Source health</h2>
+            <div id="sources" class="list"></div>
+          </section>
         </aside>
-        <section class="grid" id="cards" aria-live="polite"></section>
-      </section>
+      </div>
     </main>
 
     <script>
-      const state = { items: [], stats: null };
       const $ = (id) => document.getElementById(id);
-      const controls = ["search", "category", "risk", "country", "sector"].map($);
+      const state = { items: [], stats: {}, alerts: [], sources: [], brief: {} };
+      const controls = ["q", "risk", "category", "country", "sector"].map($);
+      const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
+      const opt = (value) => { const o = document.createElement("option"); o.value = value; o.textContent = value; return o; };
+      const chip = (text, cls = "chip") => { const el = document.createElement("span"); el.className = cls; el.textContent = text; return el; };
 
-      function text(v) { return String(v ?? ""); }
-      function unique(values) { return [...new Set(values.filter(Boolean))].sort(); }
-      function safeUrl(url) { return /^https?:\/\//i.test(text(url)) ? text(url) : ""; }
-      function clamp(s, n = 280) { s = text(s); return s.length > n ? s.slice(0, n).trimEnd() + "…" : s; }
-
-      function optionize(select, values, label) {
-        select.replaceChildren(new Option(label, ""), ...values.map(v => new Option(v, v)));
+      function hydrateFilters() {
+        const risks = uniq(state.items.map(i => i.risk_level));
+        const categories = uniq(state.items.map(i => i.category));
+        const countries = uniq(state.items.flatMap(i => i.affected_countries || []));
+        const sectors = uniq(state.items.flatMap(i => i.affected_sectors || []));
+        [["risk", risks], ["category", categories], ["country", countries], ["sector", sectors]].forEach(([id, values]) => {
+          const current = $(id).value;
+          $(id).replaceChildren(opt(id === "risk" ? "" : ""), ...values.map(opt));
+          $(id).firstChild.textContent = id === "risk" ? "All risk" : id === "category" ? "All categories" : id === "country" ? "All countries" : "All sectors";
+          $(id).value = current;
+        });
       }
 
       function renderStats() {
-        const stats = state.stats || {};
-        const high = (stats.by_risk_level?.Critical || 0) + (stats.by_risk_level?.High || 0);
-        const cards = [
-          ["Total items", stats.total_items || 0],
-          ["Avg risk", stats.average_risk_score || 0],
-          ["Critical/High", high],
-          ["Top country", stats.top_countries?.[0]?.[0] || "—"],
-        ];
-        $("stats").replaceChildren(...cards.map(([label, value]) => {
-          const el = document.createElement("article"); el.className = "stat";
-          el.innerHTML = `<div class="label"></div><div class="value"></div>`;
-          el.querySelector(".label").textContent = label;
-          el.querySelector(".value").textContent = value;
-          return el;
-        }));
+        $("totalItems").textContent = state.stats.total_items ?? state.items.length;
+        $("avgRisk").textContent = state.stats.average_risk_score ?? "—";
+        const byRisk = state.stats.by_risk_level || {};
+        $("highCount").textContent = (byRisk.Critical || 0) + (byRisk.High || 0);
+        $("alertCount").textContent = state.alerts.length;
       }
 
       function renderCards(items) {
-        const root = $("cards");
-        root.replaceChildren();
-        if (!items.length) {
-          const empty = document.createElement("div"); empty.className = "empty side";
-          empty.textContent = "No matching intelligence items. Try clearing filters or press Refresh.";
-          root.appendChild(empty); return;
-        }
-        for (const it of items) {
+        const cards = items.map(item => {
           const card = document.createElement("article"); card.className = "card";
-          const url = safeUrl(it.source_url);
-          const tags = [...(it.tags || []), ...(it.affected_countries || []), ...(it.affected_sectors || [])];
-          card.innerHTML = `
-            <div class="cardHeader">
-              <h3></h3>
-              <div class="riskBadge ${text(it.risk_level)}"></div>
-            </div>
-            <div class="chips meta"></div>
-            <div class="summary"></div>
-            <div class="explain">
-              <div><strong>Why it matters:</strong> <span class="why"></span></div>
-              <div><strong>Recommended action:</strong> <span class="action"></span></div>
-            </div>
-            <div class="source"></div>`;
-          card.querySelector("h3").textContent = clamp(it.title, 140);
-          card.querySelector(".riskBadge").textContent = `${it.risk_level} ${it.risk_score}`;
-          card.querySelector(".summary").textContent = clamp(it.summary, 420);
-          card.querySelector(".why").textContent = it.why_it_matters || "Scored from source and rule-based signals.";
-          card.querySelector(".action").textContent = it.recommended_action || "Monitor for updates.";
-          const meta = card.querySelector(".meta");
-          [it.category, `Confidence ${it.confidence_score}`].concat(unique(tags).slice(0, 8)).forEach(tag => {
-            const span = document.createElement("span"); span.className = "pill"; span.textContent = tag; meta.appendChild(span);
-          });
-          const source = card.querySelector(".source");
-          if (url) {
-            const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noreferrer"; a.textContent = it.source_domain || url;
-            source.append("Source: ", a);
-          } else { source.textContent = `Source: ${it.source_domain || "unknown"}`; }
-          root.appendChild(card);
-        }
+          const title = document.createElement("h3");
+          const link = document.createElement("a"); link.href = item.source_url; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = item.title;
+          title.append(link); card.append(title);
+          const meta = document.createElement("div"); meta.className = "meta";
+          meta.append(chip(item.risk_level, `pill risk-${item.risk_level}`), chip(`Risk ${item.risk_score}`), chip(`Confidence ${item.confidence_score}`), chip(item.category), chip(item.source_domain || "source"));
+          (item.watchlist_matches || []).slice(0, 3).forEach(m => meta.append(chip(`Watchlist: ${m.watchlist_name} · ${m.matched_value}`, "badge watch")));
+          card.append(meta);
+          const summary = document.createElement("p"); summary.className = "summary"; summary.textContent = item.summary || "No summary available."; card.append(summary);
+          const factors = document.createElement("div"); factors.className = "section";
+          const fl = document.createElement("div"); fl.className = "factor-list";
+          (item.risk_factors || []).slice(0, 8).forEach(f => fl.append(chip(f)));
+          factors.append(chip("Risk factors", "badge"), fl); card.append(factors);
+          if ((item.confidence_factors || []).length) {
+            const cl = document.createElement("div"); cl.className = "factor-list";
+            (item.confidence_factors || []).slice(0, 5).forEach(f => cl.append(chip(f)));
+            card.append(cl);
+          }
+          if ((item.watchlist_matches || []).length) {
+            const wl = document.createElement("div"); wl.className = "section summary";
+            wl.textContent = (item.watchlist_matches || []).map(m => m.reason).join(" · "); card.append(wl);
+          }
+          return card;
+        });
+        $("cards").replaceChildren(...cards);
       }
 
       function applyFilters() {
-        const q = $("search").value.trim().toLowerCase();
-        const category = $("category").value;
-        const risk = $("risk").value;
-        const country = $("country").value;
-        const sector = $("sector").value;
-        const filtered = state.items.filter(it => {
-          const hay = [it.title, it.summary, ...(it.tags || []), ...(it.entities?.cves || [])].join(" ").toLowerCase();
-          return (!q || hay.includes(q))
-            && (!category || it.category === category)
-            && (!risk || it.risk_level === risk)
-            && (!country || (it.affected_countries || []).includes(country))
-            && (!sector || (it.affected_sectors || []).includes(sector));
+        const q = $("q").value.toLowerCase();
+        const risk = $("risk").value; const category = $("category").value; const country = $("country").value; const sector = $("sector").value;
+        const filtered = state.items.filter(item => {
+          const text = `${item.title} ${item.summary} ${(item.tags || []).join(" ")}`.toLowerCase();
+          return (!q || text.includes(q)) && (!risk || item.risk_level === risk) && (!category || item.category === category) && (!country || (item.affected_countries || []).includes(country)) && (!sector || (item.affected_sectors || []).includes(sector));
         });
         renderCards(filtered);
       }
 
-      function hydrateFilters() {
-        optionize($("category"), unique(state.items.map(i => i.category)), "All categories");
-        optionize($("risk"), ["Critical", "High", "Medium", "Low"].filter(r => state.items.some(i => i.risk_level === r)), "All risk levels");
-        optionize($("country"), unique(state.items.flatMap(i => i.affected_countries || [])), "All countries");
-        optionize($("sector"), unique(state.items.flatMap(i => i.affected_sectors || [])), "All sectors");
+      function renderSidebars() {
+        $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
+        $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
+        $("alerts").replaceChildren(...(state.alerts.length ? state.alerts.slice(0, 6).map(alert => {
+          const el = document.createElement("div"); el.className = "mini";
+          el.innerHTML = `<strong>${alert.risk_level}: ${alert.matched_watchlist}</strong><div class="muted"></div>`;
+          el.querySelector(".muted").textContent = `${alert.title} — ${alert.reason}`;
+          return el;
+        }) : [chip("No alert-ready watchlist matches")]);
+        $("sources").replaceChildren(...state.sources.slice(0, 8).map(src => {
+          const el = document.createElement("div"); el.className = "mini";
+          const status = src.last_error ? "err" : (src.last_success_at ? "ok" : "muted");
+          el.innerHTML = `<strong class="${status}">${src.last_error ? "Failing" : src.last_success_at ? "Healthy" : "Pending"}</strong><div class="muted"></div>`;
+          el.querySelector(".muted").textContent = `${src.source_url} · failures ${src.failure_count || 0}${src.last_error ? ` · ${src.last_error}` : ""}`;
+          return el;
+        }));
       }
 
       async function load() {
-        $("status").textContent = "Status: loading...";
-        $("status").classList.remove("err");
         try {
-          const [itemsRes, statsRes, summaryRes] = await Promise.all([
-            fetch("/api/items", { cache: "no-store" }),
-            fetch("/api/stats", { cache: "no-store" }),
-            fetch("/api/summary", { cache: "no-store" }),
+          const [itemsRes, statsRes, alertsRes, sourcesRes, briefRes] = await Promise.all([
+            fetch("/api/items", { cache: "no-store" }), fetch("/api/stats", { cache: "no-store" }), fetch("/api/alerts", { cache: "no-store" }), fetch("/api/sources", { cache: "no-store" }), fetch("/api/brief/daily", { cache: "no-store" })
           ]);
-          if (!itemsRes.ok || !statsRes.ok || !summaryRes.ok) throw new Error("API request failed");
-          state.items = await itemsRes.json();
-          state.stats = await statsRes.json();
-          const summary = await summaryRes.json();
-          hydrateFilters(); renderStats(); applyFilters();
-          $("summaryText").textContent = summary.headline || "No summary available yet.";
-          $("focusChips").replaceChildren(...(summary.recommended_focus || []).slice(0, 3).map(action => {
-            const chip = document.createElement("span"); chip.className = "chip"; chip.textContent = action; return chip;
-          }));
+          if (![itemsRes, statsRes, alertsRes, sourcesRes, briefRes].every(r => r.ok)) throw new Error("API request failed");
+          state.items = await itemsRes.json(); state.stats = await statsRes.json(); state.alerts = await alertsRes.json(); state.sources = await sourcesRes.json(); state.brief = await briefRes.json();
+          hydrateFilters(); renderStats(); renderSidebars(); applyFilters();
           $("status").textContent = `Status: OK · ${state.items.length} items`;
         } catch (err) {
-          console.error(err);
-          $("status").textContent = `Status: ERROR · ${err.message}`;
-          $("status").classList.add("err");
-          renderCards([]);
+          $("status").textContent = `Status: ERROR · ${err.message}`; $("status").classList.add("err"); renderCards([]);
         }
       }
 
-      $("refresh").addEventListener("click", async () => {
-        const button = $("refresh"); button.disabled = true; button.textContent = "Refreshing...";
-        try { await fetch("/api/refresh", { method: "POST" }); } finally { button.disabled = false; button.textContent = "Refresh"; load(); }
-      });
+      $("refresh").addEventListener("click", async () => { const b = $("refresh"); b.disabled = true; b.textContent = "Refreshing…"; try { await fetch("/api/refresh", { method: "POST" }); } finally { b.disabled = false; b.textContent = "Refresh"; load(); } });
       controls.forEach(control => control.addEventListener("input", applyFilters));
       load();
     </script>

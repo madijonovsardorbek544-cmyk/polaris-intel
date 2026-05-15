@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Query
 
 from ..config import settings
-from ..database import get_item, list_items
+from ..database import get_item, list_items, list_source_health
+from ..services.briefing import generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_store, seed_demo_items
 
 router = APIRouter(prefix="/api")
+
 
 
 @router.get("/latest")
@@ -57,6 +60,21 @@ async def refresh() -> dict[str, object]:
 async def seed() -> dict[str, object]:
     seeded = await seed_demo_items()
     return {"ok": True, "seeded": len(seeded)}
+
+
+@router.get("/sources")
+async def sources() -> list[dict[str, object]]:
+    return [asdict(source) for source in await list_source_health()]
+
+
+@router.get("/alerts")
+async def alerts() -> list[dict[str, object]]:
+    return generate_alerts(await list_items(settings.max_items))
+
+
+@router.get("/brief/daily")
+async def daily_brief() -> dict[str, object]:
+    return generate_daily_brief(await list_items(settings.max_items), await list_source_health())
 
 
 @router.get("/stats")

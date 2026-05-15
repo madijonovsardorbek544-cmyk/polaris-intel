@@ -1,23 +1,38 @@
 # POLARIS Intel
 
-POLARIS Intel is a FastAPI cyber-geopolitical intelligence MVP. It ingests RSS feeds, extracts observable risk signals, assigns transparent rule-based risk and confidence scores, and presents the results in a mobile-friendly dashboard.
+POLARIS Intel is a **paid pilot-ready foundation** for an explainable cyber-geopolitical intelligence dashboard. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches items against customer watchlists, and presents alert-ready intelligence in a FastAPI/Jinja2 dashboard.
 
-The project does **not** claim to be an AI analyst or an enterprise threat-intelligence platform. POLARIS v1 is an explainable, deterministic intelligence dashboard designed for local demos, product validation, and future integration work.
+POLARIS is **not enterprise-grade yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is intended to support first paid pilot conversations, workflow validation, and controlled deployments with clear limitations.
 
-## What POLARIS does
+## What is implemented
 
-- Ingests cyber and geopolitical RSS feeds.
-- Deduplicates intelligence items by title and source URL.
-- Classifies items as `Cyber`, `Geopolitics`, `Hybrid`, or `General`.
-- Extracts:
-  - CVEs by regex.
-  - Countries and blocs: Uzbekistan, Kazakhstan, Russia, Ukraine, China, Taiwan, USA, Iran, Israel, NATO, EU.
-  - Sectors: banking, education, government, energy, telecom, healthcare, logistics, defense.
-  - Cyber terms: ransomware, phishing, malware, exploit, zero-day, DDoS, credential leak, breach.
-- Scores risk using CVEs, active exploitation, ransomware, zero-day language, source reliability, country/sector exposure, geopolitical escalation words, and watchlist relevance.
-- Scores confidence using source reliability, extracted entity count, title/summary clarity, and matching risk signals.
-- Explains each item with `why_it_matters` and `recommended_action` fields.
-- Supports simple watchlists for countries, sectors, organizations, keywords, CVEs, and threat actors.
+- FastAPI application with Jinja2 dashboard.
+- `.env`-based local configuration via `python-dotenv` support.
+- RSS ingestion with explicit refresh logging and source failure tracking.
+- Optional PostgreSQL persistence for intelligence items, watchlists, and source health.
+- In-memory mode for fast local demos when `DATABASE_URL` is not set.
+- Entity extraction for CVEs, selected countries/blocs, sectors, and cyber terms.
+- Deterministic item classification: `Cyber`, `Geopolitics`, `Hybrid`, or `General`.
+- Explainable scoring fields:
+  - `risk_factors`, for example `CISA source reliability +22`, `CVE detected +15`, `Watchlist match +12`.
+  - `confidence_factors`, for example source corroboration, structured entity detection, and summary clarity.
+- Watchlists for countries, sectors, organizations, keywords, CVEs, and threat actors.
+- Watchlist match explanations showing which watchlist matched and why.
+- Alert-ready logic for Critical/High items that match a watchlist.
+- Daily brief endpoint with top risks, affected countries/sectors, recommended actions, and source failures.
+- Responsive dashboard panels for source health, risk factors, watchlist badges, alerts, and daily brief.
+- Tests for `.env` loading, source failure logging, factors, alerts, daily brief, watchlist update, scoring, entities, and deduplication.
+
+## What is still future work
+
+- Authentication, authorization, tenants, and role-based access control.
+- Production audit trails and immutable alert/event history.
+- Real notification delivery: email, Slack, Teams, webhook, Jira, ServiceNow.
+- Analyst workflow: assignments, status, notes, acknowledgements, and escalation state.
+- Stronger source normalization, feed quality controls, and source-specific parsers.
+- Customer-specific scoring calibration and explainability tuning.
+- Enterprise deployment hardening: migrations, observability, backups, rate limits, and SSO.
+- Human-reviewed intelligence production process and legal/compliance review.
 
 ## Project structure
 
@@ -32,8 +47,9 @@ src/
   scoring.py
   entities.py
   services/
-    ingestion.py
     analysis.py
+    briefing.py
+    ingestion.py
   routes/
     health.py
     intelligence.py
@@ -41,6 +57,7 @@ src/
   templates/
     index.html
 tests/
+pytest.ini
 ```
 
 ## Setup
@@ -49,7 +66,6 @@ tests/
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
 uvicorn src.main:app --reload
 ```
 
@@ -57,7 +73,7 @@ Open the dashboard at <http://127.0.0.1:8000/>.
 
 ## Configuration
 
-`.env.example` documents supported environment variables:
+Create a local `.env` file if you want to override defaults:
 
 ```env
 PORT=8000
@@ -69,21 +85,26 @@ FEEDS=
 LOG_LEVEL=INFO
 ```
 
-- `DATABASE_URL`: when set, POLARIS uses PostgreSQL and creates tables automatically at startup.
+- `DATABASE_URL`: when set, POLARIS uses PostgreSQL and creates/updates required tables at startup.
 - `MAX_ITEMS`: maximum number of intelligence items returned/stored in memory.
 - `AUTO_REFRESH_SECONDS`: background refresh interval.
 - `HTTP_TIMEOUT`: RSS HTTP request timeout in seconds.
 - `FEEDS`: optional comma-separated RSS feed override. If empty, built-in cyber and world-news feeds are used.
+- `LOG_LEVEL`: standard Python logging level.
 
 ## Demo mode vs database mode
 
 ### Demo/in-memory mode
 
-If `DATABASE_URL` is empty, POLARIS runs without PostgreSQL. Items and watchlists are stored in process memory and reset when the server restarts. This is the easiest local demo mode.
+If `DATABASE_URL` is empty, POLARIS runs without PostgreSQL. Items, source health, and watchlists are stored in process memory and reset when the server restarts. This is the easiest local pilot-demo mode.
 
 ### PostgreSQL mode
 
-If `DATABASE_URL` is set, POLARIS creates `intel_items` and `watchlists` tables automatically and persists ingested items/watchlists.
+If `DATABASE_URL` is set, POLARIS creates/updates these tables automatically:
+
+- `intel_items`
+- `watchlists`
+- `source_health`
 
 Example:
 
@@ -110,10 +131,28 @@ uvicorn src.main:app --reload
 - `POST /api/refresh` — force RSS refresh.
 - `POST /api/seed` — load deterministic sample intelligence items.
 
+### Source health
+
+- `GET /api/sources` — source health records.
+
+Example response item:
+
+```json
+{
+  "source_url": "https://www.cisa.gov/news-events/alerts.xml",
+  "last_success_at": "2026-05-15T12:00:00+00:00",
+  "last_failure_at": null,
+  "failure_count": 0,
+  "last_error": null
+}
+```
+
 ### Watchlists
 
 - `POST /api/watchlists` — create a watchlist.
 - `GET /api/watchlists` — list watchlists.
+- `GET /api/watchlists/{id}` — retrieve watchlist detail.
+- `PUT /api/watchlists/{id}` — replace/update a watchlist while keeping the same ID and creation timestamp.
 - `DELETE /api/watchlists/{id}` — delete a watchlist.
 
 Example watchlist payload:
@@ -130,17 +169,44 @@ Example watchlist payload:
 }
 ```
 
+### Alerts
+
+- `GET /api/alerts` — generated from `Critical`/`High` intelligence items that match at least one watchlist.
+
+Each alert includes:
+
+- `item_id`
+- `title`
+- `risk_level`
+- `matched_watchlist`
+- `reason`
+- `recommended_action`
+- `created_at`
+
+### Daily brief
+
+- `GET /api/brief/daily` — pilot-friendly summary for analyst review.
+
+The response includes:
+
+- `headline_summary`
+- `top_5_risks`
+- `countries_affected`
+- `sectors_affected`
+- `recommended_actions`
+- `source_failures`
+
 ## Testing
 
 ```bash
 pytest -q
 ```
 
-Tests cover risk scoring, risk-level thresholds, CVE extraction, country extraction, sector extraction, deduplication, and watchlist relevance.
+The suite covers scoring, entity extraction, watchlist matching, `.env` loading, source failure logging, explainability factors, alert generation, daily brief generation, and watchlist updates.
 
 ## Deployment notes
 
-A simple production deployment should:
+A simple pilot deployment should:
 
 1. Install `requirements.txt`.
 2. Set environment variables, especially `DATABASE_URL` for persistence.

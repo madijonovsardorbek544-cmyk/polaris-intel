@@ -5,7 +5,6 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-import feedparser
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
@@ -33,6 +32,8 @@ def _entry_date(entry: Any) -> str:
 
 
 def parse_feed(xml_text: str, fallback_source: str) -> list[dict[str, str]]:
+    import feedparser
+
     parsed = feedparser.parse(xml_text)
     output: list[dict[str, str]] = []
     for entry in parsed.entries:

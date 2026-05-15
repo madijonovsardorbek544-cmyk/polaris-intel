@@ -5,10 +5,11 @@ import json
 from typing import Any
 
 from .config import settings
-from .models import IntelligenceItem, Watchlist
+from .models import IntelligenceItem, SourceHealth, Watchlist, WatchlistMatch
 
 _ITEMS: list[IntelligenceItem] = []
 _WATCHLISTS: list[Watchlist] = []
+_SOURCE_HEALTH: dict[str, SourceHealth] = {}
 _LOCK = asyncio.Lock()
 
 
@@ -22,6 +23,61 @@ def _psycopg():
 
 def database_enabled() -> bool:
     return bool(settings.database_url)
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value or [])
+
+
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _dt(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _matches_from_json(value: Any) -> list[WatchlistMatch]:
+    output: list[WatchlistMatch] = []
+    for raw in _as_list(value):
+        if not isinstance(raw, dict):
+            continue
+        output.append(
+            WatchlistMatch(
+                watchlist_id=str(raw.get("watchlist_id", "")),
+                watchlist_name=str(raw.get("watchlist_name", "")),
+                matched_on=str(raw.get("matched_on", "")),
+                matched_value=str(raw.get("matched_value", "")),
+                reason=str(raw.get("reason", "")),
+            )
+        )
+    return output
+
+
+def _matches_to_json(matches: list[WatchlistMatch]) -> str:
+    return json.dumps([match.__dict__ for match in matches])
 
 
 async def init_db() -> None:
@@ -55,6 +111,9 @@ async def init_db() -> None:
                     );
                     """
                 )
+                cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS risk_factors JSONB NOT NULL DEFAULT '[]'::jsonb;")
+                cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS confidence_factors JSONB NOT NULL DEFAULT '[]'::jsonb;")
+                cur.execute("ALTER TABLE intel_items ADD COLUMN IF NOT EXISTS watchlist_matches JSONB NOT NULL DEFAULT '[]'::jsonb;")
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS watchlists (
@@ -70,13 +129,20 @@ async def init_db() -> None:
                     );
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS source_health (
+                        source_url TEXT PRIMARY KEY,
+                        last_success_at TIMESTAMPTZ,
+                        last_failure_at TIMESTAMPTZ,
+                        failure_count INTEGER NOT NULL DEFAULT 0,
+                        last_error TEXT
+                    );
+                    """
+                )
             conn.commit()
 
     await asyncio.to_thread(run)
-
-
-def _json(value: Any) -> str:
-    return json.dumps(value or [])
 
 
 def _item_from_row(row: tuple[Any, ...]) -> IntelligenceItem:
@@ -90,14 +156,17 @@ def _item_from_row(row: tuple[Any, ...]) -> IntelligenceItem:
         confidence_score=row[6],
         source_url=row[7],
         source_domain=row[8],
-        tags=row[9] if isinstance(row[9], list) else [],
-        entities=row[10] if isinstance(row[10], dict) else {},
-        affected_countries=row[11] if isinstance(row[11], list) else [],
-        affected_sectors=row[12] if isinstance(row[12], list) else [],
+        tags=_as_list(row[9]),
+        entities=_as_dict(row[10]),
+        affected_countries=_as_list(row[11]),
+        affected_sectors=_as_list(row[12]),
         why_it_matters=row[13],
         recommended_action=row[14],
-        created_at=row[15].isoformat() if hasattr(row[15], "isoformat") else str(row[15]),
-        ingested_at=row[16].isoformat() if hasattr(row[16], "isoformat") else str(row[16]),
+        created_at=_dt(row[15]) or "",
+        ingested_at=_dt(row[16]) or "",
+        risk_factors=_as_list(row[17]),
+        confidence_factors=_as_list(row[18]),
+        watchlist_matches=_matches_from_json(row[19]),
     )
 
 
@@ -121,9 +190,10 @@ async def save_items(items: list[IntelligenceItem]) -> None:
                         INSERT INTO intel_items
                         (id, title, summary, category, risk_score, risk_level, confidence_score,
                          source_url, source_domain, tags, entities, affected_countries, affected_sectors,
-                         why_it_matters, recommended_action, created_at, ingested_at)
+                         why_it_matters, recommended_action, created_at, ingested_at, risk_factors,
+                         confidence_factors, watchlist_matches)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
-                                %s::jsonb, %s, %s, %s, %s)
+                                %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
                         ON CONFLICT (id) DO UPDATE SET
                             title = EXCLUDED.title,
                             summary = EXCLUDED.summary,
@@ -139,7 +209,10 @@ async def save_items(items: list[IntelligenceItem]) -> None:
                             affected_sectors = EXCLUDED.affected_sectors,
                             why_it_matters = EXCLUDED.why_it_matters,
                             recommended_action = EXCLUDED.recommended_action,
-                            ingested_at = EXCLUDED.ingested_at;
+                            ingested_at = EXCLUDED.ingested_at,
+                            risk_factors = EXCLUDED.risk_factors,
+                            confidence_factors = EXCLUDED.confidence_factors,
+                            watchlist_matches = EXCLUDED.watchlist_matches;
                         """,
                         (
                             item.id,
@@ -159,6 +232,9 @@ async def save_items(items: list[IntelligenceItem]) -> None:
                             item.recommended_action,
                             item.created_at,
                             item.ingested_at,
+                            _json(item.risk_factors),
+                            _json(item.confidence_factors),
+                            _matches_to_json(item.watchlist_matches),
                         ),
                     )
             conn.commit()
@@ -176,7 +252,8 @@ async def list_items(limit: int | None = None) -> list[IntelligenceItem]:
                         """
                         SELECT id, title, summary, category, risk_score, risk_level, confidence_score,
                                source_url, source_domain, tags, entities, affected_countries, affected_sectors,
-                               why_it_matters, recommended_action, created_at, ingested_at
+                               why_it_matters, recommended_action, created_at, ingested_at,
+                               risk_factors, confidence_factors, watchlist_matches
                         FROM intel_items
                         ORDER BY risk_score DESC, ingested_at DESC
                         LIMIT %s;
@@ -217,13 +294,13 @@ def _watchlist_from_row(row: tuple[Any, ...]) -> Watchlist:
     return Watchlist(
         id=row[0],
         name=row[1],
-        countries=row[2] if isinstance(row[2], list) else [],
-        sectors=row[3] if isinstance(row[3], list) else [],
-        organizations=row[4] if isinstance(row[4], list) else [],
-        keywords=row[5] if isinstance(row[5], list) else [],
-        cves=row[6] if isinstance(row[6], list) else [],
-        threat_actors=row[7] if isinstance(row[7], list) else [],
-        created_at=row[8].isoformat() if hasattr(row[8], "isoformat") else str(row[8]),
+        countries=_as_list(row[2]),
+        sectors=_as_list(row[3]),
+        organizations=_as_list(row[4]),
+        keywords=_as_list(row[5]),
+        cves=_as_list(row[6]),
+        threat_actors=_as_list(row[7]),
+        created_at=_dt(row[8]) or "",
     )
 
 
@@ -279,6 +356,51 @@ async def list_watchlists() -> list[Watchlist]:
         return list(_WATCHLISTS)
 
 
+async def get_watchlist(watchlist_id: str) -> Watchlist | None:
+    for watchlist in await list_watchlists():
+        if watchlist.id == watchlist_id:
+            return watchlist
+    return None
+
+
+async def update_watchlist(watchlist_id: str, updated: Watchlist) -> Watchlist | None:
+    found = False
+    async with _LOCK:
+        for index, existing in enumerate(_WATCHLISTS):
+            if existing.id == watchlist_id:
+                _WATCHLISTS[index] = updated
+                found = True
+                break
+
+    if database_enabled():
+        def run() -> bool:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE watchlists
+                        SET name = %s, countries = %s::jsonb, sectors = %s::jsonb, organizations = %s::jsonb,
+                            keywords = %s::jsonb, cves = %s::jsonb, threat_actors = %s::jsonb
+                        WHERE id = %s;
+                        """,
+                        (
+                            updated.name,
+                            _json(updated.countries),
+                            _json(updated.sectors),
+                            _json(updated.organizations),
+                            _json(updated.keywords),
+                            _json(updated.cves),
+                            _json(updated.threat_actors),
+                            watchlist_id,
+                        ),
+                    )
+                    count = cur.rowcount > 0
+                conn.commit()
+                return count
+        found = await asyncio.to_thread(run) or found
+    return updated if found else None
+
+
 async def delete_watchlist(watchlist_id: str) -> bool:
     deleted = False
     async with _LOCK:
@@ -301,3 +423,92 @@ async def delete_watchlist(watchlist_id: str) -> bool:
 async def replace_memory_items(items: list[IntelligenceItem]) -> None:
     async with _LOCK:
         _ITEMS[:] = items[: settings.max_items]
+
+
+async def record_source_success(source_url: str, occurred_at: str) -> SourceHealth:
+    async with _LOCK:
+        health = _SOURCE_HEALTH.get(source_url, SourceHealth(source_url=source_url))
+        health.last_success_at = occurred_at
+        health.last_error = None
+        _SOURCE_HEALTH[source_url] = health
+
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO source_health (source_url, last_success_at, last_error)
+                        VALUES (%s, %s, NULL)
+                        ON CONFLICT (source_url) DO UPDATE SET
+                            last_success_at = EXCLUDED.last_success_at,
+                            last_error = NULL;
+                        """,
+                        (source_url, occurred_at),
+                    )
+                conn.commit()
+        await asyncio.to_thread(run)
+    return health
+
+
+async def record_source_failure(source_url: str, occurred_at: str, error: str) -> SourceHealth:
+    safe_error = error[:500]
+    async with _LOCK:
+        health = _SOURCE_HEALTH.get(source_url, SourceHealth(source_url=source_url))
+        health.last_failure_at = occurred_at
+        health.failure_count += 1
+        health.last_error = safe_error
+        _SOURCE_HEALTH[source_url] = health
+
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO source_health (source_url, last_failure_at, failure_count, last_error)
+                        VALUES (%s, %s, 1, %s)
+                        ON CONFLICT (source_url) DO UPDATE SET
+                            last_failure_at = EXCLUDED.last_failure_at,
+                            failure_count = source_health.failure_count + 1,
+                            last_error = EXCLUDED.last_error;
+                        """,
+                        (source_url, occurred_at, safe_error),
+                    )
+                conn.commit()
+        await asyncio.to_thread(run)
+    return health
+
+
+def _source_from_row(row: tuple[Any, ...]) -> SourceHealth:
+    return SourceHealth(
+        source_url=row[0],
+        last_success_at=_dt(row[1]),
+        last_failure_at=_dt(row[2]),
+        failure_count=row[3],
+        last_error=row[4],
+    )
+
+
+async def list_source_health() -> list[SourceHealth]:
+    if database_enabled():
+        def run() -> list[SourceHealth]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT source_url, last_success_at, last_failure_at, failure_count, last_error
+                        FROM source_health
+                        ORDER BY COALESCE(last_failure_at, last_success_at) DESC NULLS LAST, source_url ASC;
+                        """
+                    )
+                    return [_source_from_row(row) for row in cur.fetchall()]
+        rows = await asyncio.to_thread(run)
+        by_url = {row.source_url: row for row in rows}
+    else:
+        async with _LOCK:
+            by_url = dict(_SOURCE_HEALTH)
+
+    for feed_url in settings.feeds:
+        by_url.setdefault(feed_url, SourceHealth(source_url=feed_url))
+    return list(by_url.values())
