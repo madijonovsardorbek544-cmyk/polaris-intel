@@ -9,7 +9,9 @@ from typing import Any
 from ..config import settings
 from ..database import (
     deduplicate_items,
+    get_org_profile,
     list_items,
+    list_source_configs,
     list_watchlists,
     record_source_empty,
     record_source_failure,
@@ -59,7 +61,9 @@ async def fetch_feed_result(client: object, feed_url: str) -> FeedFetchResult:
 
     await record_source_success(feed_url, now_iso())
     watchlists = await list_watchlists()
-    items = [analyze_item(entry["title"], entry["summary"], entry["source_url"], watchlists, entry["created_at"]) for entry in entries]
+    org_ids = {watchlist.org_id for watchlist in watchlists}
+    profiles = {org_id: await get_org_profile(org_id) for org_id in org_ids}
+    items = [analyze_item(entry["title"], entry["summary"], entry["source_url"], watchlists, entry["created_at"], profiles) for entry in entries]
     return FeedFetchResult(feed_url=feed_url, items=items, ok=True, error=None, empty=False)
 
 
@@ -77,12 +81,15 @@ async def refresh_store(force: bool = False) -> dict[str, Any]:
             return {"ok": True, "status": "cached", "items": len(cached_items)}
         _LAST_REFRESH_STATUS = "loading"
         _LAST_REFRESH_TS = now
-        logger.info("Feed refresh started feeds=%s", len(settings.feeds))
+        source_configs = await list_source_configs()
+        enabled_sources = [source.url for source in source_configs if source.enabled]
+        feeds = enabled_sources or settings.feeds
+        logger.info("Feed refresh started feeds=%s", len(feeds))
 
     import httpx
 
     async with httpx.AsyncClient() as client:
-        feed_results = await asyncio.gather(*(fetch_feed_result(client, feed) for feed in settings.feeds))
+        feed_results = await asyncio.gather(*(fetch_feed_result(client, feed) for feed in feeds))
 
     merged: list[IntelligenceItem] = []
     for result in feed_results:
@@ -119,6 +126,8 @@ async def refresh_store(force: bool = False) -> dict[str, Any]:
 
 async def seed_demo_items() -> list[IntelligenceItem]:
     watchlists = await list_watchlists()
+    org_ids = {watchlist.org_id for watchlist in watchlists}
+    profiles = {org_id: await get_org_profile(org_id) for org_id in org_ids}
     demo = [
         analyze_item(
             "CISA warns CVE-2026-12345 is actively exploited in government networks",
@@ -126,6 +135,7 @@ async def seed_demo_items() -> list[IntelligenceItem]:
             "https://www.cisa.gov/news-events/cybersecurity-advisories/sample-cve-2026-12345",
             watchlists,
             now_iso(),
+            profiles,
         ),
         analyze_item(
             "Ransomware campaign targets healthcare logistics providers",
@@ -133,6 +143,7 @@ async def seed_demo_items() -> list[IntelligenceItem]:
             "https://www.bleepingcomputer.com/news/security/sample-ransomware-healthcare-logistics/",
             watchlists,
             now_iso(),
+            profiles,
         ),
         analyze_item(
             "Missile strike raises Russia Ukraine escalation risk near energy infrastructure",
@@ -140,6 +151,7 @@ async def seed_demo_items() -> list[IntelligenceItem]:
             "https://www.reuters.com/world/sample-russia-ukraine-energy-risk/",
             watchlists,
             now_iso(),
+            profiles,
         ),
     ]
     await save_items(demo)

@@ -34,6 +34,10 @@ def generate_alerts(items: list[IntelligenceItem]) -> list[dict[str, object]]:
                     "updated_at": created_at,
                     "notes": None,
                     "org_id": match.org_id,
+                    "owner": None,
+                    "due_at": None,
+                    "severity_override": None,
+                    "resolution_summary": None,
                 }
             )
     return alerts
@@ -55,6 +59,10 @@ def alerts_from_items(items: list[IntelligenceItem]) -> list[Alert]:
             updated_at=str(raw["updated_at"]),
             notes=raw.get("notes") if raw.get("notes") is None else str(raw.get("notes")),
             org_id=str(raw.get("org_id") or "demo"),
+            owner=raw.get("owner") if raw.get("owner") is None else str(raw.get("owner")),
+            due_at=raw.get("due_at") if raw.get("due_at") is None else str(raw.get("due_at")),
+            severity_override=raw.get("severity_override") if raw.get("severity_override") is None else str(raw.get("severity_override")),
+            resolution_summary=raw.get("resolution_summary") if raw.get("resolution_summary") is None else str(raw.get("resolution_summary")),
         )
         for raw in generate_alerts(items)
     ]

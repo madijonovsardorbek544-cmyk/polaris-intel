@@ -79,8 +79,53 @@ class AlertOut(BaseModel):
     updated_at: str
     notes: str | None = None
     org_id: str = "demo"
+    owner: str | None = None
+    due_at: str | None = None
+    severity_override: str | None = None
+    resolution_summary: str | None = None
 
 
 class AlertUpdate(BaseModel):
-    status: str | None = Field(default=None, pattern="^(open|acknowledged|resolved)$")
+    status: str | None = Field(default=None, pattern="^(open|acknowledged|in_progress|resolved|false_positive)$")
     notes: str | None = Field(default=None, max_length=2000)
+    owner: str | None = Field(default=None, max_length=200)
+    due_at: str | None = Field(default=None, max_length=80)
+    severity_override: str | None = Field(default=None, pattern="^(Critical|High|Medium|Low)$")
+    resolution_summary: str | None = Field(default=None, max_length=4000)
+
+class AlertEventOut(BaseModel):
+    id: str
+    alert_id: str
+    event_type: str
+    message: str
+    created_at: str
+
+
+class SourceConfigCreate(BaseModel):
+    url: str = Field(..., min_length=1, max_length=1000)
+    label: str = Field(..., min_length=1, max_length=200)
+    category: str = Field(default="custom", pattern="^(cyber|geopolitical|local|custom)$")
+    enabled: bool = True
+
+
+class SourceConfigUpdate(BaseModel):
+    url: str | None = Field(default=None, min_length=1, max_length=1000)
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    category: str | None = Field(default=None, pattern="^(cyber|geopolitical|local|custom)$")
+    enabled: bool | None = None
+
+
+class SourceConfigOut(SourceConfigCreate):
+    id: str
+    created_at: str
+
+
+class OrgScoringProfileIn(BaseModel):
+    high_priority_countries: list[str] = Field(default_factory=list)
+    high_priority_sectors: list[str] = Field(default_factory=list)
+    risk_boost_keywords: list[str] = Field(default_factory=list)
+    risk_reduce_keywords: list[str] = Field(default_factory=list)
+
+
+class OrgScoringProfileOut(OrgScoringProfileIn):
+    org_id: str
