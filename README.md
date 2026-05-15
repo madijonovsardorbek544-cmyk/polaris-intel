@@ -2,7 +2,7 @@
 
 ## Live Demo
 
-Live demo: Coming soon. Deploy using the instructions below.
+Live demo: https://polaris-intel.onrender.com
 
 POLARIS Intel is a **single-org pilot deployment product** for explainable cyber-geopolitical intelligence. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches intelligence against operator watchlists, persists alerts, and presents a FastAPI/Jinja2 dashboard for controlled pilot deployments.
 
