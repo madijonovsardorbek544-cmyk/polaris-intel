@@ -17,7 +17,7 @@ from ..models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, Sou
 from ..schemas import AlertUpdate, OrgScoringProfileIn, SourceConfigCreate, SourceConfigUpdate
 from ..services.analysis import now_iso
 from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
-from ..services.ingestion import item_to_dict, refresh_store, seed_demo_items
+from ..services.ingestion import item_to_dict, refresh_status, refresh_store, seed_demo_items
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,26 @@ async def refresh() -> dict[str, object]:
 async def seed() -> dict[str, object]:
     seeded = await seed_demo_items()
     return {"ok": True, "seeded": len(seeded)}
+
+
+@router.get("/public-demo-stats", dependencies=[Depends(require_read_api_key)])
+async def public_demo_stats(org_id: str = Query(default=settings.default_org)) -> dict[str, object]:
+    all_items = await list_items(settings.max_items)
+    source_health = await list_source_health()
+    watchlists = [watchlist for watchlist in await list_watchlists() if watchlist.org_id == org_id]
+    org_items = [item for item in all_items if _item_matches_org(item, org_id)]
+    org_alerts = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
+    high_critical = [item for item in all_items if item.risk_level in {"Critical", "High"}]
+    return {
+        "global_items": len(all_items),
+        "global_high_critical": len(high_critical),
+        "sources": len(source_health) or len(settings.feeds),
+        "active_org": org_id,
+        "org_items": len(org_items),
+        "org_watchlists": len(watchlists),
+        "org_alerts": len(org_alerts),
+        "last_status": refresh_status(),
+    }
 
 
 @router.get("/sources", dependencies=[Depends(require_read_api_key)])
@@ -306,7 +326,7 @@ async def onboarding_template() -> dict[str, object]:
     return {"templates": ONBOARDING_TEMPLATES}
 
 
-async def build_value_report(org_id: str, days: int) -> dict[str, object]:
+async def build_value_report(org_id: str | None, days: int) -> dict[str, object]:
     items = [item for item in await list_items(settings.max_items) if _item_matches_org(item, org_id)]
     alerts_for_org = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     countries = Counter(country for item in items for country in item.affected_countries)
@@ -345,7 +365,7 @@ async def build_value_report(org_id: str, days: int) -> dict[str, object]:
 
 
 @router.get("/reports/value", dependencies=[Depends(require_read_api_key)])
-async def value_report(org_id: str = Query(default=settings.default_org), days: int = Query(default=7, ge=1, le=90)) -> dict[str, object]:
+async def value_report(org_id: str | None = None, days: int = Query(default=7, ge=1, le=90)) -> dict[str, object]:
     return await build_value_report(org_id, days)
 
 
@@ -360,13 +380,13 @@ def _csv_response(filename: str, rows: list[dict[str, object]]) -> Response:
 
 
 @router.get("/export/alerts.csv", dependencies=[Depends(require_read_api_key)])
-async def export_alerts_csv(org_id: str = Query(default=settings.default_org)) -> Response:
+async def export_alerts_csv(org_id: str | None = None) -> Response:
     rows = [alert_to_dict(alert) for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     return _csv_response("alerts.csv", rows)
 
 
 @router.get("/export/value-report.csv", dependencies=[Depends(require_read_api_key)])
-async def export_value_report_csv(org_id: str = Query(default=settings.default_org), days: int = Query(default=7, ge=1, le=90)) -> Response:
+async def export_value_report_csv(org_id: str | None = None, days: int = Query(default=7, ge=1, le=90)) -> Response:
     report = await build_value_report(org_id, days)
     return _csv_response("value-report.csv", [report])
 

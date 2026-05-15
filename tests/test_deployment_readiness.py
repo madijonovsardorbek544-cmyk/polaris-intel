@@ -101,11 +101,24 @@ def test_dashboard_public_demo_diagnostics_and_resilient_loading() -> None:
     assert "safeJsonFetch(url, options, fallback, label)" in html
     assert "Promise.allSettled" in html
     assert "Promise.all([" not in html
-    assert "Dashboard partially loaded" in html
+    assert "Status: PARTIAL" in html
     assert "Value report" in html and "Source config" in html and "Onboarding templates" in html
-    assert "No watchlists yet. Add a watchlist to make alerts organization-specific." in html
+    assert "No watchlists for this org yet. Add one to make intelligence customer-specific." in html
     assert "No alerts yet. Add a watchlist, then generate persistent alerts." in html
-    assert "No org-specific items yet. Global items exist, but none match this org’s watchlists." in html
+    assert "No org-specific matches yet" in html
+    assert "Switch to Global Intelligence" in html
+    assert "Global Intelligence" in html and "Org Watchlist" in html
+    assert 'safeJsonFetch(scopedUrl("/api/items")' in html
+    assert "window.location" not in html
+
+
+
+def test_readme_mentions_live_demo_and_view_modes() -> None:
+    readme = (ROOT / "README.md").read_text()
+    assert "https://polaris-intel.onrender.com" in readme
+    assert "Global Intelligence" in readme
+    assert "Org Watchlist" in readme
+    assert "visitors can see live risk items immediately" in readme
 
 
 def test_reuters_broken_feed_removed() -> None:

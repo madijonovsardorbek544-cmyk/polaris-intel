@@ -52,7 +52,11 @@
       .notice { min-height:18px; margin-top:8px; font-size:13px; }
       .deployment-banners { display:grid; gap:10px; margin:0 0 16px; }
       .demo-panel { margin:0 0 16px; padding:18px; }
-      .demo-metrics, .diagnostic-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+      .demo-metrics, .diagnostic-links, .mode-toggle, .demo-buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+      .mode-toggle button { width:auto; min-width:180px; }
+      .mode-toggle button.active { background:rgba(122,229,130,.18); border-color:rgba(122,229,130,.45); color:#fff; }
+      .empty-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+      .empty-actions button { width:auto; }
       .status-details { margin-top:8px; display:grid; gap:4px; }
       .banner { border:1px solid var(--line); border-radius:14px; padding:11px 14px; font-size:14px; background:rgba(138,180,255,.12); color:var(--text); }
       .banner.warning { border-color:rgba(255,159,104,.45); background:rgba(255,159,104,.14); }
@@ -67,7 +71,7 @@
           <h1>{{ app_name }}</h1>
           <p class="subtitle">Real pilot customer workflow product for explainable cyber-geopolitical intelligence. Tracks RSS sources, watchlist matches, risk drivers, persistent alert workflow, and a daily brief.</p>
         </div>
-        <div class="status"><div id="status">Status: {{ status }} · {{ items_count }} items</div><div id="statusDetails" class="status-details muted"></div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div></div>
+        <div class="status"><div id="status">Status: {{ status }} · Global Intelligence · {{ items_count }} items</div><div id="statusDetails" class="status-details muted"></div><div class="muted">v{{ version }}</div><div class="muted">Active org: <strong id="activeOrgLabel">{{ default_org }}</strong></div><div class="muted">Current mode: <strong id="statusMode">Global Intelligence</strong></div></div>
       </header>
 
       {% if demo_mode or not api_key_configured %}
@@ -82,13 +86,29 @@
       {% endif %}
 
       <section class="panel demo-panel" aria-label="Public Demo">
-        <h2>Public Demo</h2>
-        <p class="summary">POLARIS monitors cyber and geopolitical risk signals and explains what matters to an organization.</p>
+        <h2>POLARIS Public Demo</h2>
+        <p class="summary">Explore global cyber and geopolitical risk signals. Switch to Org Watchlist mode to see customer-specific matching after adding watchlists.</p>
+        <div class="mode-toggle" role="group" aria-label="Dashboard view mode">
+          <button id="globalMode" type="button" data-view-mode="global">Global Intelligence</button>
+          <button id="orgMode" type="button" data-view-mode="org">Org Watchlist</button>
+        </div>
         <div class="demo-metrics">
-          <span class="chip"><strong id="demoItems">{{ items_count }}</strong>&nbsp;items monitored</span>
-          <span class="chip"><strong id="demoSources">—</strong>&nbsp;sources</span>
-          <span class="chip"><strong id="demoHighCount">—</strong>&nbsp;high/critical</span>
+          <span class="chip"><strong id="demoItems">{{ items_count }}</strong>&nbsp;global items monitored</span>
+          <span class="chip">Active org: <strong id="demoActiveOrg">{{ default_org }}</strong></span>
+          <span class="chip">Current mode: <strong id="demoMode">Global Intelligence</strong></span>
+          <span class="chip"><strong id="demoSources">—</strong>&nbsp;sources checked</span>
           <span class="chip">Last refresh: <strong id="demoLastStatus">{{ status }}</strong></span>
+          <span class="chip"><strong id="demoHighCount">—</strong>&nbsp;high/critical global</span>
+          <span class="chip" id="demoOrgItemsChip" style="display:none"><strong id="demoOrgItems">—</strong>&nbsp;org-specific items</span>
+        </div>
+        <div class="section">
+          <h3>Try these demo watchlists</h3>
+          <p class="muted">Load a sample into the form below, then add an API key if you want to save it.</p>
+          <div class="demo-buttons">
+            <button type="button" data-demo-template="school">School cyber risk</button>
+            <button type="button" data-demo-template="energy">Energy infrastructure</button>
+            <button type="button" data-demo-template="bank">Bank/finance risk</button>
+          </div>
         </div>
         <p class="muted section">Read-only public demo. Operator actions require an API key.</p>
       </section>
@@ -191,7 +211,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const initialItemsCount = {{ items_count }};
-      const state = { items: [], stats: {}, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, activeOrg: "{{ default_org }}", panelErrors: {}, criticalStatus: {} };
+      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {} };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
       const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
@@ -202,6 +222,11 @@
       function adminHeaders() { const key = sessionStorage.getItem("polarisAdminApiKey") || ""; return key ? { "X-Polaris-API-Key": key } : {}; }
       function activeOrg() { return (sessionStorage.getItem("polarisActiveOrg") || state.activeOrg || "{{ default_org }}").trim() || "{{ default_org }}"; }
       function orgQuery() { return `org_id=${encodeURIComponent(activeOrg())}`; }
+      function currentViewMode() { const saved = sessionStorage.getItem("polarisViewMode"); return saved === "org" ? "org" : "global"; }
+      function modeLabel() { return state.viewMode === "org" ? "Org Watchlist" : "Global Intelligence"; }
+      function scopedUrl(base) { return state.viewMode === "org" ? `${base}?${orgQuery()}` : base; }
+      function valueReportUrl() { return state.viewMode === "org" ? `/api/reports/value?${orgQuery()}&days=7` : "/api/reports/value?days=7"; }
+      function exportUrl(base) { return state.viewMode === "org" ? `${base}?${orgQuery()}` : base; }
       function setNotice(id, message, ok = false) { const el = $(id); el.textContent = message || ""; el.className = `notice ${message ? (ok ? "ok" : "err") : ""}`; }
       $("adminKey").value = sessionStorage.getItem("polarisAdminApiKey") || "";
       $("adminKey").addEventListener("input", (event) => { sessionStorage.setItem("polarisAdminApiKey", event.target.value); setNotice("authNotice", event.target.value ? "Admin API key saved for this tab." : "", true); });
@@ -209,6 +234,16 @@
       $("activeOrgLabel").textContent = activeOrg();
       $("wlOrg").value = activeOrg();
       $("activeOrg").addEventListener("change", async (event) => { const next = event.target.value.trim() || "{{ default_org }}"; sessionStorage.setItem("polarisActiveOrg", next); state.activeOrg = next; $("activeOrgLabel").textContent = next; $("wlOrg").value = next; await load(); });
+      function setViewMode(mode, reload = true) {
+        state.viewMode = mode === "org" ? "org" : "global";
+        sessionStorage.setItem("polarisViewMode", state.viewMode);
+        $("globalMode").classList.toggle("active", state.viewMode === "global");
+        $("orgMode").classList.toggle("active", state.viewMode === "org");
+        $("statusMode").textContent = modeLabel();
+        $("demoMode").textContent = modeLabel();
+        if (reload) load();
+      }
+      setViewMode(currentViewMode(), false);
 
       function hydrateFilters() {
         const risks = uniq(state.items.map(i => i.risk_level));
@@ -237,13 +272,30 @@
         card.append(text); return card;
       }
 
+      function orgEmptyStateCard(hasFilters) {
+        const card = document.createElement("article"); card.className = "card";
+        const title = document.createElement("h2"); title.textContent = hasFilters ? "No items match the current filters." : "No org-specific matches yet.";
+        const summary = document.createElement("p"); summary.className = "summary";
+        summary.textContent = hasFilters ? "Clear filters or switch back to Global Intelligence to inspect all current signals." : "POLARIS has global intelligence data, but no items match the active org watchlists yet.";
+        const watchlistHint = document.createElement("p"); watchlistHint.className = "muted";
+        watchlistHint.textContent = state.publicStats.org_watchlists ? "Tune watchlist criteria or review global items for relevant keywords." : "No watchlists for this org yet. Add one to make intelligence customer-specific.";
+        const actions = document.createElement("div"); actions.className = "empty-actions";
+        const add = document.createElement("button"); add.type = "button"; add.textContent = "Add a watchlist"; add.addEventListener("click", () => $("wlName").focus());
+        const template = document.createElement("button"); template.type = "button"; template.textContent = "Use an onboarding template"; template.addEventListener("click", () => $("templateSelect").focus());
+        const global = document.createElement("button"); global.type = "button"; global.textContent = "Switch to Global Intelligence"; global.addEventListener("click", () => setViewMode("global"));
+        actions.append(add, template, global);
+        card.append(title, summary, watchlistHint, actions); return card;
+      }
+
       function renderCards(items) {
         if (!items.length) {
-          const hasGlobalItems = initialItemsCount > 0;
+          const hasGlobalItems = (state.publicStats.global_items || initialItemsCount) > 0;
           const hasFilters = ["q", "risk", "category", "country", "sector"].some(id => $(id).value);
-          const message = state.items.length === 0 && hasGlobalItems
-            ? "No org-specific items yet. Global items exist, but none match this org’s watchlists."
-            : (hasFilters ? "No items match the current filters." : "No intelligence items available yet.");
+          if (state.viewMode === "org" && hasGlobalItems) {
+            $("cards").replaceChildren(orgEmptyStateCard(hasFilters));
+            return;
+          }
+          const message = hasFilters ? "No items match the current filters." : "No intelligence items available yet.";
           $("cards").replaceChildren(emptyCard(message));
           return;
         }
@@ -292,7 +344,7 @@
           const del = document.createElement("button"); del.className = "danger section"; del.textContent = "Delete"; del.addEventListener("click", () => deleteWatchlist(wl.id));
           const actions = document.createElement("div"); actions.className = "form-grid"; actions.append(edit, del);
           el.append(strong, muted, actions); return el;
-        }) : [chip("No watchlists yet. Add a watchlist to make alerts organization-specific.")]));
+        }) : [chip("No watchlists for this org yet. Add one to make intelligence customer-specific.")]));
       }
 
       function alertText(alert) { return `${alert.title || ""} ${alert.reason || ""} ${alert.matched_watchlist_name || alert.matched_watchlist || ""}`.toLowerCase(); }
@@ -388,19 +440,26 @@
       }
 
       function renderPublicDemo() {
-        const byRisk = state.items.reduce((acc, item) => { acc[item.risk_level] = (acc[item.risk_level] || 0) + 1; return acc; }, {});
-        $("demoItems").textContent = state.items.length || initialItemsCount;
-        $("demoSources").textContent = state.sources.length;
-        $("demoHighCount").textContent = (byRisk.Critical || 0) + (byRisk.High || 0);
-        $("demoLastStatus").textContent = state.panelErrors.items ? "partial" : "OK";
+        const stats = state.publicStats || {};
+        $("demoItems").textContent = stats.global_items ?? initialItemsCount;
+        $("demoActiveOrg").textContent = state.activeOrg;
+        $("demoMode").textContent = modeLabel();
+        $("statusMode").textContent = modeLabel();
+        $("demoSources").textContent = stats.sources ?? state.sources.length;
+        $("demoHighCount").textContent = stats.global_high_critical ?? 0;
+        $("demoLastStatus").textContent = stats.last_status || (state.panelErrors.items ? "PARTIAL" : "OK");
+        $("demoOrgItems").textContent = stats.org_items ?? state.items.length;
+        $("demoOrgItemsChip").style.display = state.viewMode === "org" ? "inline-flex" : "none";
+        $("globalMode").classList.toggle("active", state.viewMode === "global");
+        $("orgMode").classList.toggle("active", state.viewMode === "org");
       }
 
       function renderDiagnostics() {
         const links = [
           ["Health", "/health"],
           ["Dashboard health", "/api/dashboard-health"],
-          ["Items", `/api/items?${orgQuery()}`],
-          ["Alerts", `/api/alerts?${orgQuery()}`],
+          ["Items", scopedUrl("/api/items")],
+          ["Alerts", scopedUrl("/api/alerts")],
           ["Sources", "/api/sources"],
         ];
         $("diagnostics").replaceChildren(...links.map(([label, href]) => {
@@ -432,17 +491,17 @@
       }
 
       function renderStatus() {
-        const criticalLabels = ["items", "alerts", "sources", "brief"];
+        const criticalLabels = ["items", "publicStats", "sources"];
         const failedCritical = criticalLabels.filter(label => state.panelErrors[label]);
         const errors = Object.values(state.panelErrors);
         if (failedCritical.length === criticalLabels.length) {
           $("status").textContent = "Status: ERROR · critical dashboard APIs failed";
           $("status").classList.add("err");
         } else if (errors.length) {
-          $("status").textContent = `Dashboard partially loaded · ${state.activeOrg} · ${state.items.length} items`;
+          $("status").textContent = `Status: PARTIAL · ${modeLabel()} · ${state.activeOrg} · ${state.items.length} visible items`;
           $("status").classList.remove("err");
         } else {
-          $("status").textContent = `Status: OK · ${state.activeOrg} · ${state.items.length} items`;
+          $("status").textContent = `Status: OK · ${modeLabel()} · ${state.activeOrg} · ${state.items.length} visible items`;
           $("status").classList.remove("err");
         }
         $("statusDetails").replaceChildren(...errors.map(message => {
@@ -460,6 +519,7 @@
 
       async function load() {
         state.activeOrg = activeOrg();
+        state.viewMode = currentViewMode();
         state.panelErrors = {};
         $("activeOrgLabel").textContent = state.activeOrg;
         $("wlOrg").value = $("wlOrg").value.trim() || state.activeOrg;
@@ -467,13 +527,14 @@
         const headers = adminHeaders();
         const requestOptions = { cache: "no-store", headers };
         await Promise.allSettled([
-          safeJsonFetch(`/api/items?${orgQuery()}`, requestOptions, [], "items").then(data => { state.items = Array.isArray(data) ? data : []; }),
-          safeJsonFetch(`/api/alerts?${orgQuery()}`, requestOptions, { persisted: [], generated_preview: [], total_persisted: 0, total_generated_preview: 0 }, "alerts").then(data => { state.alerts = data || { persisted: [], generated_preview: [] }; }),
+          safeJsonFetch(scopedUrl("/api/items"), requestOptions, [], "items").then(data => { state.items = Array.isArray(data) ? data : []; }),
+          safeJsonFetch(`/api/public-demo-stats?${orgQuery()}`, requestOptions, state.publicStats, "publicStats").then(data => { state.publicStats = data || state.publicStats; }),
+          safeJsonFetch(scopedUrl("/api/alerts"), requestOptions, { persisted: [], generated_preview: [], total_persisted: 0, total_generated_preview: 0 }, "alerts").then(data => { state.alerts = data || { persisted: [], generated_preview: [] }; }),
           safeJsonFetch("/api/sources", requestOptions, [], "sources").then(data => { state.sources = Array.isArray(data) ? data : []; }),
-          safeJsonFetch(`/api/brief/daily?${orgQuery()}`, requestOptions, {}, "brief").then(data => { state.brief = data || {}; }),
+          safeJsonFetch(scopedUrl("/api/brief/daily"), requestOptions, {}, "brief").then(data => { state.brief = data || {}; }),
           safeJsonFetch(`/api/watchlists?${orgQuery()}`, requestOptions, [], "watchlists").then(data => { state.watchlists = Array.isArray(data) ? data : []; }),
           safeJsonFetch("/api/onboarding/template", requestOptions, { templates: {} }, "onboarding").then(data => { state.templates = (data && data.templates) || {}; }),
-          safeJsonFetch(`/api/reports/value?${orgQuery()}&days=7`, requestOptions, {}, "valueReport").then(data => { state.valueReport = data || {}; }),
+          safeJsonFetch(valueReportUrl(), requestOptions, {}, "valueReport").then(data => { state.valueReport = data || {}; }),
           safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; })
         ]);
         await Promise.allSettled((state.alerts.persisted || []).map(async alert => {
@@ -494,8 +555,9 @@
         finally { b.disabled = false; b.textContent = "Refresh"; }
       }
 
-      function applyTemplate() {
-        const key = $("templateSelect").value; const tpl = state.templates[key];
+      function applyTemplate(templateKey, demoNotice = false) {
+        const key = typeof templateKey === "string" ? templateKey : $("templateSelect").value; const tpl = state.templates[key];
+        if (key) $("templateSelect").value = key;
         if (!tpl) return;
         $("wlName").value = `${key} watchlist`;
         $("wlCountries").value = (tpl.suggested_countries || []).join(", ");
@@ -503,7 +565,7 @@
         $("wlKeywords").value = (tpl.suggested_keywords || []).join(", ");
         $("wlCves").value = (tpl.suggested_cves || []).join(", ");
         $("wlActors").value = (tpl.suggested_threat_actors || []).join(", ");
-        setNotice("watchlistNotice", tpl.explanation || "Template applied. Edit before saving.", true);
+        setNotice("watchlistNotice", demoNotice ? "Template loaded. Add your API key to save it as a watchlist." : (tpl.explanation || "Template applied. Edit before saving."), true);
       }
 
       async function createWatchlist() {
@@ -590,15 +652,36 @@
         } catch (err) { setNotice("authNotice", err.message || "Alert update failed"); }
       }
 
+
+      async function downloadCsv(url, filename) {
+        setNotice("authNotice", "");
+        try {
+          const res = await fetch(url, { headers: adminHeaders(), cache: "no-store" });
+          if (res.status === 401) { setNotice("authNotice", "Export blocked: invalid or missing API key"); return; }
+          if (!res.ok) throw new Error("Export failed");
+          const blob = await res.blob();
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = filename;
+          document.body.append(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(link.href);
+        } catch (err) { setNotice("authNotice", err.message || "Export failed"); }
+      }
+
       $("refresh").addEventListener("click", refreshNow);
       $("createWatchlist").addEventListener("click", createWatchlist);
       $("templateSelect").addEventListener("change", applyTemplate);
       $("createSource").addEventListener("click", createSource);
-      $("exportAlerts").addEventListener("click", () => window.location = `/api/export/alerts.csv?${orgQuery()}`);
-      $("exportValue").addEventListener("click", () => window.location = `/api/export/value-report.csv?${orgQuery()}&days=7`);
+      $("exportAlerts").addEventListener("click", () => downloadCsv(exportUrl("/api/export/alerts.csv"), "alerts.csv"));
+      $("exportValue").addEventListener("click", () => downloadCsv(state.viewMode === "org" ? `/api/export/value-report.csv?${orgQuery()}&days=7` : "/api/export/value-report.csv?days=7", "value-report.csv"));
       $("generateAlerts").addEventListener("click", generateAlerts);
       controls.forEach(control => control.addEventListener("input", applyFilters));
       alertControls.forEach(control => control.addEventListener("input", renderAlerts));
+      $("globalMode").addEventListener("click", () => setViewMode("global"));
+      $("orgMode").addEventListener("click", () => setViewMode("org"));
+      document.querySelectorAll("[data-demo-template]").forEach(button => button.addEventListener("click", () => applyTemplate(button.dataset.demoTemplate, true)));
       load();
     </script>
   </body>
