@@ -1,0 +1,21 @@
+"""Legacy Risk shape retained for merge compatibility.
+
+The active product model is src.models.IntelligenceItem. This dataclass avoids
+reintroducing SQLAlchemy/sqlmodel dependencies while keeping the historical file
+path present for repositories that still reference it in diffs.
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+
+@dataclass
+class Risk:
+    id: int | None = None
+    title: str = ""
+    summary: str = ""
+    category: str = "General"
+    risk_score: int = 0
+    risk_level: str = "Low"
+    source: str = ""
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

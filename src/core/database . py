@@ -1,0 +1,9 @@
+"""Compatibility shim for the legacy malformed database module path.
+
+New code should use src.database. This file is intentionally dependency-light so
+old repository snapshots that still contain it do not require SQLAlchemy.
+"""
+
+from src.database import database_enabled, init_db
+
+__all__ = ["database_enabled", "init_db"]
