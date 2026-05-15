@@ -35,6 +35,10 @@ class IntelligenceItem:
     risk_factors: list[str] = field(default_factory=list)
     confidence_factors: list[str] = field(default_factory=list)
     watchlist_matches: list[WatchlistMatch] = field(default_factory=list)
+    source_reliability: str = "Medium"
+    source_type: str = "custom"
+    evidence_links: list[str] = field(default_factory=list)
+    evidence_summary: str = ""
 
 
 @dataclass
@@ -133,3 +137,14 @@ class PublicMetrics:
     landing_page_views: int = 0
     demo_page_views: int = 0
     pilot_form_submissions: int = 0
+
+
+@dataclass
+class ItemFeedback:
+    id: str
+    item_id: str
+    relevance: str
+    severity_feedback: str
+    org_id: str
+    comment: str = ""
+    created_at: str = ""

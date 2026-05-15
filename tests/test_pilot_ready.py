@@ -50,11 +50,11 @@ def test_risk_and_confidence_factors_generation() -> None:
         "A critical remote code execution exploit targets government and energy networks in Ukraine.",
         "https://www.cisa.gov/news-events/alerts/example",
     )
-    assert any("CISA" in factor and "+22" in factor for factor in item.risk_factors)
+    assert any("CISA" in factor and "+8" in factor for factor in item.risk_factors)
     assert any("CVE detected" in factor for factor in item.risk_factors)
     assert any("Active exploitation language +20" == factor for factor in item.risk_factors)
     assert any("High-impact sector" in factor for factor in item.risk_factors)
-    assert any("source corroboration" in factor for factor in item.confidence_factors)
+    assert any("Official source reliability +20" in factor for factor in item.confidence_factors)
     assert any("Structured entities detected" in factor for factor in item.confidence_factors)
 
 

@@ -12,9 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from ..auth import require_api_key, require_read_api_key
 from ..config import settings
-from ..database import add_alert_event, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_alert_events, list_alerts, list_items, list_pilot_leads, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, update_alert, update_pilot_lead_status, update_source_config
-from ..models import Alert, AlertEvent, IntelligenceItem, OrgScoringProfile, PilotLead, SourceConfig
-from ..schemas import AlertUpdate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
+from ..database import add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_alert_events, list_alerts, list_item_feedback, list_items, list_pilot_leads, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, update_alert, update_pilot_lead_status, update_source_config
+from ..models import Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
+from ..schemas import AlertUpdate, ItemFeedbackCreate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
 from ..services.analysis import now_iso
 from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_status, refresh_store, seed_demo_items
@@ -69,12 +69,12 @@ async def create_lead(payload: PilotLeadCreate) -> dict[str, object]:
     )
     saved = await add_pilot_lead(lead)
     await increment_public_metric("pilot_form_submissions")
-    return asdict(saved)
+    return {"ok": True, "lead_id": saved.id, "message": "Pilot request received."}
 
 
 @router.get("/leads", dependencies=[Depends(require_api_key)])
-async def leads(limit: int = Query(default=50, ge=1, le=200)) -> list[dict[str, object]]:
-    return [asdict(lead) for lead in await list_pilot_leads(limit)]
+async def leads(status: str | None = Query(default=None, pattern="^(new|contacted|qualified|rejected)$"), limit: int = Query(default=50, ge=1, le=200)) -> list[dict[str, object]]:
+    return [asdict(lead) for lead in await list_pilot_leads(limit, status=status)]
 
 
 @router.patch("/leads/{lead_id}", dependencies=[Depends(require_api_key)])
@@ -417,6 +417,61 @@ def _csv_response(filename: str, rows: list[dict[str, object]]) -> Response:
     for row in rows:
         writer.writerow({key: (value if not isinstance(value, (list, dict)) else str(value)) for key, value in row.items()})
     return Response(content=buffer.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+
+@router.get("/reports/customer-proof", dependencies=[Depends(require_read_api_key)])
+async def customer_proof_report(org_id: str = Query(..., min_length=1), days: int = Query(default=7, ge=1, le=90)) -> dict[str, object]:
+    items = [item for item in await list_items(settings.max_items) if _item_matches_org(item, org_id)]
+    alerts_for_org = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
+    watchlists = [watchlist for watchlist in await list_watchlists() if watchlist.org_id == org_id]
+    sources = await list_source_health()
+    top_risks = [item.title for item in sorted(items, key=lambda item: (item.risk_score, item.ingested_at), reverse=True)[:3]]
+    actions = []
+    for item in sorted(items, key=lambda item: (item.risk_score, item.ingested_at), reverse=True):
+        if item.recommended_action and item.recommended_action not in actions:
+            actions.append(item.recommended_action)
+        if len(actions) == 3:
+            break
+    open_alerts = [alert for alert in alerts_for_org if alert.status not in {"resolved", "false_positive"}]
+    resolved_alerts = [alert for alert in alerts_for_org if alert.status in {"resolved", "false_positive"}]
+    health = Counter(source.status for source in sources)
+    source_summary = {"total_sources": len(sources) or len(settings.feeds), "healthy": health.get("healthy", 0), "failing": health.get("failing", 0), "empty": health.get("empty", 0), "pending": health.get("pending", 0)}
+    proof_summary = (
+        f"POLARIS monitored {len(items)} risk signals from {source_summary['total_sources']} sources, "
+        f"matched {len(alerts_for_org)} alerts to your organization, and produced {len(actions)} recommended actions this week."
+    )
+    return {
+        "org_id": org_id,
+        "period_days": days,
+        "items_monitored": len(items),
+        "watchlists_count": len(watchlists),
+        "alerts_generated": len(alerts_for_org),
+        "alerts_open": len(open_alerts),
+        "alerts_resolved": len(resolved_alerts),
+        "top_3_risks": top_risks,
+        "top_3_recommended_actions": actions,
+        "source_health_summary": source_summary,
+        "proof_summary": proof_summary,
+    }
+
+
+@router.post("/feedback/item/{item_id}", dependencies=[Depends(require_api_key)], status_code=status.HTTP_201_CREATED)
+async def create_item_feedback(item_id: str, payload: ItemFeedbackCreate) -> dict[str, object]:
+    feedback = ItemFeedback(
+        id=str(uuid.uuid4()),
+        item_id=item_id,
+        relevance=payload.relevance,
+        severity_feedback=payload.severity_feedback,
+        org_id=payload.org_id.strip(),
+        comment=payload.comment.strip(),
+        created_at=now_iso(),
+    )
+    return asdict(await add_item_feedback(feedback))
+
+
+@router.get("/feedback", dependencies=[Depends(require_api_key)])
+async def feedback(limit: int = Query(default=200, ge=1, le=500)) -> list[dict[str, object]]:
+    return [asdict(item) for item in await list_item_feedback(limit)]
 
 
 @router.get("/export/alerts.csv", dependencies=[Depends(require_read_api_key)])

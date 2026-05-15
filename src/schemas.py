@@ -35,6 +35,10 @@ class IntelligenceItemOut(BaseModel):
     risk_factors: list[str] = Field(default_factory=list)
     confidence_factors: list[str] = Field(default_factory=list)
     watchlist_matches: list[WatchlistMatchOut] = Field(default_factory=list)
+    source_reliability: str = "Medium"
+    source_type: str = "custom"
+    evidence_links: list[str] = Field(default_factory=list)
+    evidence_summary: str = ""
 
 
 class WatchlistCreate(BaseModel):
@@ -172,3 +176,16 @@ class PublicMetricsOut(BaseModel):
     landing_page_views: int = 0
     demo_page_views: int = 0
     pilot_form_submissions: int = 0
+
+
+class ItemFeedbackCreate(BaseModel):
+    relevance: str = Field(..., pattern="^(useful|not_useful|false_positive)$")
+    severity_feedback: str = Field(..., pattern="^(too_high|accurate|too_low)$")
+    org_id: str = Field(..., min_length=1, max_length=80)
+    comment: str = Field(default="", max_length=2000)
+
+
+class ItemFeedbackOut(ItemFeedbackCreate):
+    id: str
+    item_id: str
+    created_at: str

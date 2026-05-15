@@ -484,3 +484,26 @@ Use `GET /api/org-profile?org_id=<org_id>` and `PUT /api/org-profile?org_id=<org
 - Analyst queues and assignment SLAs
 - Customer admin portal
 - Legal/compliance review
+
+## Real pilot persistence and Render deployment
+
+In-memory demo mode is only appropriate for the public demo and local product walkthroughs. Because Render web services can restart or scale, in-memory data can disappear. For real pilots, create a Render PostgreSQL instance and set `DATABASE_URL` on the web service so pilot leads, watchlists, alerts, feedback, public metrics, and customer proof inputs persist.
+
+### Pilot deployment checklist
+
+1. Set `POLARIS_API_KEY` to a strong secret.
+2. Set `POLARIS_PROTECT_READS=true` for real customer deployments.
+3. Set `DATABASE_URL` from Render PostgreSQL.
+4. Set `POLARIS_DEFAULT_ORG` to the pilot customer org slug.
+5. Add a watchlist from the dashboard First pilot setup wizard.
+6. Generate alerts from the dashboard.
+7. Test `/health` after deploy.
+8. Submit a test lead from `/request-pilot`.
+9. Export the customer proof report from the dashboard.
+
+### New pilot acquisition endpoints
+
+- `POST /api/leads` is public and returns only `{ "ok": true, "lead_id": "...", "message": "Pilot request received." }`.
+- `GET /api/leads`, `PATCH /api/leads/{lead_id}`, and `GET /api/public-metrics` require `X-Polaris-API-Key`.
+- `GET /api/reports/customer-proof?org_id=<org_id>&days=7` summarizes monitored items, alert outcomes, top risks/actions, source health, and customer-proof summary text.
+- `POST /api/feedback/item/{item_id}` and `GET /api/feedback` collect operator feedback without changing scoring yet.

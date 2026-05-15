@@ -155,6 +155,23 @@
             <div id="briefActions" class="factor-list"></div>
           </section>
           <section class="panel">
+            <h2>First pilot setup</h2>
+            <p class="muted">Guided onboarding wizard: choose org type, region, sectors, organization keywords, then create a watchlist, generate alerts, and view the daily brief.</p>
+            <div id="pilotReady" class="notice"></div>
+            <div class="form-grid">
+              <select id="wizardOrgType"><option value="school">school</option><option value="NGO">NGO</option><option value="logistics">logistics</option><option value="bank">bank/finance</option><option value="energy">energy</option><option value="government">telecom/government-adjacent</option><option value="custom">other</option></select>
+              <input id="wizardRegion" placeholder="Main country/region" />
+              <input id="wizardSectors" placeholder="Sectors, comma-separated" />
+              <input id="wizardOrgName" placeholder="Organization name" />
+              <input id="wizardKeywords" placeholder="Keywords, comma-separated" />
+              <button id="wizardPrefill" type="button">Prefill watchlist</button>
+              <button id="wizardCreate" type="button">Create watchlist</button>
+              <button id="wizardGenerate" type="button">Generate alerts</button>
+            </div>
+            <div id="wizardProgress" class="factor-list section"></div>
+            <div id="wizardNotice" class="notice"></div>
+          </section>
+          <section class="panel">
             <h2>Watchlists</h2>
             <div class="form-grid">
               <input id="wlName" placeholder="Name" />
@@ -186,7 +203,10 @@
             <div id="alerts" class="list"></div>
           </section>
           <section class="panel">
-            <h2>Value report</h2>
+            <h2>Customer proof report</h2>
+            <div id="customerProof" class="list">Loading customer proof report…</div>
+            <div class="form-grid section"><button id="copyProof" type="button">Copy summary text</button><button id="exportProofText" type="button">Export plain text</button></div>
+            <h2 class="section">Value report</h2>
             <div id="valueReport" class="list">Loading value report…</div>
             <div class="form-grid section"><button id="exportAlerts">Export alerts CSV</button><button id="exportValue">Export value report CSV</button></div>
           </section>
@@ -225,7 +245,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const initialItemsCount = {{ items_count }};
-      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [] };
+      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, customerProof: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [] };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
       const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
@@ -240,6 +260,7 @@
       function modeLabel() { return state.viewMode === "org" ? "Org Watchlist" : "Global Intelligence"; }
       function scopedUrl(base) { return state.viewMode === "org" ? `${base}?${orgQuery()}` : base; }
       function valueReportUrl() { return state.viewMode === "org" ? `/api/reports/value?${orgQuery()}&days=7` : "/api/reports/value?days=7"; }
+      function customerProofUrl() { return `/api/reports/customer-proof?org_id=${encodeURIComponent(activeOrg())}&days=7`; }
       function exportUrl(base) { return state.viewMode === "org" ? `${base}?${orgQuery()}` : base; }
       function setNotice(id, message, ok = false) { const el = $(id); el.textContent = message || ""; el.className = `notice ${message ? (ok ? "ok" : "err") : ""}`; }
       $("adminKey").value = sessionStorage.getItem("polarisAdminApiKey") || "";
@@ -320,11 +341,19 @@
           else { title.textContent = item.title || "Untitled item"; }
           card.append(title);
           const meta = document.createElement("div"); meta.className = "meta";
-          meta.append(chip(item.risk_level, `pill risk-${item.risk_level}`), chip(`Risk ${item.risk_score}`), chip(`Confidence ${item.confidence_score}`), chip(item.category), chip(item.source_domain || "source"));
+          meta.append(chip(item.risk_level, `pill risk-${item.risk_level}`), chip(`Risk ${item.risk_score}`), chip(`Confidence ${item.confidence_score}`), chip(item.category), chip(item.source_domain || "source"), chip(`Reliability: ${item.source_reliability || "Medium"}`), chip(`Type: ${item.source_type || "custom"}`));
           (item.watchlist_matches || []).slice(0, 3).forEach(m => meta.append(chip(`Watchlist: ${m.watchlist_name} · ${m.matched_value}`, "badge watch")));
           card.append(meta);
           const summary = document.createElement("p"); summary.className = "summary"; summary.textContent = item.summary || "No summary available."; card.append(summary);
-          const fl = document.createElement("div"); fl.className = "factor-list"; (item.risk_factors || []).slice(0, 8).forEach(f => fl.append(chip(f))); card.append(fl);
+          const evidence = document.createElement("p"); evidence.className = "summary"; evidence.textContent = item.evidence_summary ? `Evidence: ${item.evidence_summary}` : "Evidence: Source link and extracted feed summary."; card.append(evidence);
+          const evidenceUrl = safeHttpUrl((item.evidence_links || [])[0]); if (evidenceUrl) { const a = document.createElement("a"); a.href = evidenceUrl; a.target = "_blank"; a.rel = "noreferrer"; a.className = "chip"; a.textContent = "Evidence link"; card.append(a); }
+          const fl = document.createElement("div"); fl.className = "factor-list"; (item.risk_factors || []).slice(0, 8).forEach(f => fl.append(chip(f))); (item.confidence_factors || []).slice(0, 4).forEach(f => fl.append(chip(f))); card.append(fl);
+          const feedback = document.createElement("div"); feedback.className = "form-grid section";
+          const relevance = document.createElement("select"); [["useful","Useful"],["not_useful","Not useful"],["false_positive","False positive"]].forEach(([v,t]) => { const o = opt(v); o.textContent = t; relevance.append(o); });
+          const severity = document.createElement("select"); [["accurate","Severity accurate"],["too_high","Severity too high"],["too_low","Severity too low"]].forEach(([v,t]) => { const o = opt(v); o.textContent = t; severity.append(o); });
+          const comment = document.createElement("input"); comment.placeholder = "Feedback comment";
+          const send = document.createElement("button"); send.textContent = "Save feedback"; send.addEventListener("click", () => sendFeedback(item.id, { relevance: relevance.value, severity_feedback: severity.value, comment: comment.value, org_id: activeOrg() }));
+          feedback.append(relevance, severity, comment, send); card.append(feedback);
           if ((item.watchlist_matches || []).length) { const wl = document.createElement("div"); wl.className = "section summary"; wl.textContent = item.watchlist_matches.map(m => m.reason).join(" · "); card.append(wl); }
           return card;
         });
@@ -413,7 +442,7 @@
       function renderSidebars() {
         $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
         $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
-        renderWatchlists(); renderAlerts(); renderValueReport(); renderSourceConfigs();
+        renderWizard(); renderWatchlists(); renderAlerts(); renderCustomerProof(); renderValueReport(); renderSourceConfigs();
         if (state.panelErrors.onboarding) setNotice("watchlistNotice", state.panelErrors.onboarding);
         if (!state.panelErrors.sourceConfigs && !state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
         $("sources").replaceChildren(...(state.sources.length ? state.sources.slice(0, 8).map(src => {
@@ -423,6 +452,26 @@
           const muted = document.createElement("div"); muted.className = "muted"; muted.textContent = `${src.source_url} · current failures ${src.consecutive_failure_count || 0} · total failures ${src.total_failure_count || 0} · empty ${src.empty_count || 0}${src.last_error ? ` · ${src.last_error}` : ""}`;
           el.append(strong, muted); return el;
         }) : [chip("No source health yet — Action: Add source")]));
+      }
+
+      function renderWizard() {
+        const steps = [
+          ["1 Choose organization type", $("wizardOrgType").value], ["2 Choose main country/region", $("wizardRegion").value],
+          ["3 Choose sectors", $("wizardSectors").value], ["4 Add organization name and keywords", $("wizardOrgName").value || $("wizardKeywords").value],
+          ["5 Create watchlist", state.watchlists.length > 0], ["6 Generate alerts", (state.alerts.total_persisted || (state.alerts.persisted || []).length) > 0], ["7 View daily brief", !!state.brief.headline_summary]
+        ];
+        $("wizardProgress").replaceChildren(...steps.map(([label, done]) => chip(`${done ? "✓" : "•"} ${label}`)));
+        const ready = state.watchlists.length > 0 && ((state.alerts.total_persisted || (state.alerts.persisted || []).length) > 0);
+        setNotice("pilotReady", ready ? "Pilot is ready: at least one watchlist exists and alerts have been generated." : "Complete setup steps to reach Pilot is ready.", ready);
+      }
+
+      function renderCustomerProof() {
+        if (state.panelErrors.customerProof) { $("customerProof").replaceChildren(chip(state.panelErrors.customerProof, "chip err")); return; }
+        const r = state.customerProof || {};
+        const summary = document.createElement("p"); summary.className = "summary"; summary.textContent = r.proof_summary || "Customer proof report loads after items and alerts exist.";
+        const risks = document.createElement("div"); risks.className = "factor-list"; (r.top_3_risks || []).forEach(v => risks.append(chip(`Risk: ${v}`)));
+        const actions = document.createElement("div"); actions.className = "factor-list"; (r.top_3_recommended_actions || []).forEach(v => actions.append(chip(`Action: ${v}`)));
+        $("customerProof").replaceChildren(summary, risks, actions);
       }
 
       function renderValueReport() {
@@ -549,6 +598,7 @@
           safeJsonFetch(`/api/watchlists?${orgQuery()}`, requestOptions, [], "watchlists").then(data => { state.watchlists = Array.isArray(data) ? data : []; }),
           safeJsonFetch("/api/onboarding/template", requestOptions, { templates: {} }, "onboarding").then(data => { state.templates = (data && data.templates) || {}; }),
           safeJsonFetch(valueReportUrl(), requestOptions, {}, "valueReport").then(data => { state.valueReport = data || {}; }),
+          safeJsonFetch(customerProofUrl(), requestOptions, {}, "customerProof").then(data => { state.customerProof = data || {}; }),
           safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; })
         ]);
         await Promise.allSettled((state.alerts.persisted || []).map(async alert => {
@@ -678,18 +728,15 @@
 
       function renderLeads() {
         const wrap = $("pilotLeads");
-        if (!state.leads.length) { wrap.innerHTML = '<div class="mini muted">No pilot leads yet.</div>'; return; }
+        if (!state.leads.length) { const empty = document.createElement("div"); empty.className = "mini muted"; empty.textContent = "No pilot requests yet."; wrap.replaceChildren(empty); return; }
         wrap.replaceChildren(...state.leads.map(lead => {
           const div = document.createElement("div"); div.className = "mini";
-          const status = lead.status || "new";
-          div.innerHTML = `<strong>${lead.name || "Unnamed"} · ${lead.organization || "No organization"}</strong>
-            <div class="muted">${lead.email || ""} · ${lead.organization_type || ""} · ${lead.country || ""}</div>
-            <p class="summary">${lead.problem_description || ""}</p>
-            <select data-lead-status="${lead.id}">
-              ${["new", "contacted", "qualified", "rejected"].map(v => `<option value="${v}" ${v === status ? "selected" : ""}>${v}</option>`).join("")}
-            </select>`;
-          div.querySelector("select").addEventListener("change", (event) => patchLead(lead.id, { status: event.target.value }));
-          return div;
+          const strong = document.createElement("strong"); strong.textContent = `${lead.name || "Unnamed"} · ${lead.organization || "No organization"}`;
+          const meta = document.createElement("div"); meta.className = "muted"; meta.textContent = `${lead.email || ""} · ${lead.country || ""} · ${lead.organization_type || ""} · ${lead.created_at || ""}`;
+          const problem = document.createElement("p"); problem.className = "summary"; problem.textContent = lead.problem_description || "";
+          const status = document.createElement("select"); ["new", "contacted", "qualified", "rejected"].forEach(v => { const o = opt(v); o.textContent = v; status.append(o); }); status.value = lead.status || "new";
+          status.addEventListener("change", (event) => patchLead(lead.id, { status: event.target.value }));
+          div.append(strong, meta, problem, status); return div;
         }));
       }
 
@@ -704,7 +751,7 @@
 
       async function loadLeads() {
         const res = await fetch("/api/leads", { headers: adminHeaders(), cache: "no-store" });
-        if (res.status === 401) { setNotice("leadNotice", "Pilot leads blocked: invalid or missing API key."); return; }
+        if (res.status === 401) { setNotice("leadNotice", "Lead access blocked: invalid or missing API key."); return; }
         if (!res.ok) { setNotice("leadNotice", "Pilot leads failed to load."); return; }
         state.leads = await res.json();
         setNotice("leadNotice", "Pilot leads loaded.", true);
@@ -717,6 +764,35 @@
         if (!res.ok) { setNotice("leadNotice", "Lead update failed."); return; }
         await loadLeads();
       }
+
+      function wizardPrefillWatchlist() {
+        applyTemplate($("wizardOrgType").value, true);
+        if ($("wizardRegion").value.trim()) $("wlCountries").value = $("wizardRegion").value.trim();
+        if ($("wizardSectors").value.trim()) $("wlSectors").value = $("wizardSectors").value.trim();
+        const orgName = $("wizardOrgName").value.trim();
+        const keywords = csv($("wizardKeywords").value);
+        if (orgName) $("wlName").value = `${orgName} pilot watchlist`;
+        if (keywords.length) $("wlKeywords").value = keywords.join(", ");
+        setNotice("wizardNotice", "Wizard pre-filled the watchlist form. Add API key before creating.", true);
+        renderWizard();
+      }
+
+      async function wizardCreateWatchlist() {
+        if (!sessionStorage.getItem("polarisAdminApiKey")) { setNotice("wizardNotice", "Create watchlist only runs when API key is provided."); return; }
+        wizardPrefillWatchlist();
+        await createWatchlist();
+      }
+
+      async function sendFeedback(itemId, payload) {
+        const res = await fetch(`/api/feedback/item/${itemId}`, { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
+        if (res.status === 401) { setNotice("authNotice", "Feedback blocked: invalid or missing API key."); return; }
+        if (!res.ok) { setNotice("authNotice", "Feedback failed to save."); return; }
+        setNotice("authNotice", "Feedback saved.", true);
+      }
+
+      function proofText() { return (state.customerProof && state.customerProof.proof_summary) || ""; }
+      async function copyProof() { const text = proofText(); if (navigator.clipboard && text) await navigator.clipboard.writeText(text); setNotice("authNotice", text ? "Customer proof summary copied." : "No customer proof summary to copy.", !!text); }
+      function exportProofText() { const text = proofText(); const blob = new Blob([text], { type: "text/plain" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "customer-proof.txt"; document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(link.href); }
 
       async function downloadCsv(url, filename) {
         setNotice("authNotice", "");
@@ -742,6 +818,11 @@
       $("exportAlerts").addEventListener("click", () => downloadCsv(exportUrl("/api/export/alerts.csv"), "alerts.csv"));
       $("exportValue").addEventListener("click", () => downloadCsv(state.viewMode === "org" ? `/api/export/value-report.csv?${orgQuery()}&days=7` : "/api/export/value-report.csv?days=7", "value-report.csv"));
       $("generateAlerts").addEventListener("click", generateAlerts);
+      $("wizardPrefill").addEventListener("click", wizardPrefillWatchlist);
+      $("wizardCreate").addEventListener("click", wizardCreateWatchlist);
+      $("wizardGenerate").addEventListener("click", generateAlerts);
+      $("copyProof").addEventListener("click", copyProof);
+      $("exportProofText").addEventListener("click", exportProofText);
       $("reloadPublicMetrics").addEventListener("click", loadPublicMetrics);
       $("reloadLeads").addEventListener("click", loadLeads);
       controls.forEach(control => control.addEventListener("input", applyFilters));

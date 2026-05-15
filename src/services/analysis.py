@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from ..entities import extract_entities, uniq_keep_order
 from ..models import IntelligenceItem, OrgScoringProfile, Watchlist, WatchlistMatch
-from ..scoring import calculate_confidence_score_with_factors, calculate_risk_score_with_factors, matching_risk_signals, risk_level, source_domain
+from ..scoring import calculate_confidence_score_with_factors, calculate_risk_score_with_factors, evidence_summary_for_source, matching_risk_signals, risk_level, source_domain, source_reliability_tier, source_type
 
 
 def now_iso() -> str:
@@ -196,4 +196,8 @@ def analyze_item(title: str, summary: str, source_url: str, watchlists: list[Wat
         risk_factors=risk_factors,
         confidence_factors=confidence_factors,
         watchlist_matches=watchlist_matches,
+        source_reliability=source_reliability_tier(source_url),
+        source_type=source_type(source_url),
+        evidence_links=[source_url] if source_url else [],
+        evidence_summary=evidence_summary_for_source(source_url, title, summary),
     )
