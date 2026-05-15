@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: polaris-intel
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: POLARIS_API_KEY
+        sync: false
+      - key: POLARIS_PROTECT_READS
+        value: "false"
+      - key: POLARIS_DEFAULT_ORG
+        value: demo
+      - key: DATABASE_URL
+        sync: false
+      - key: MAX_ITEMS
+        value: "60"
+      - key: AUTO_REFRESH_SECONDS
+        value: "900"
+      - key: HTTP_TIMEOUT
+        value: "15"
+      - key: FEEDS
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
