@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>POLARIS Intel</title>
+    <title>{{ app_name }}</title>
     <style>
       :root { color-scheme: dark; }
       body {
@@ -49,8 +49,8 @@
   </head>
   <body>
     <div class="wrap">
-      <h1>POLARIS Intel</h1>
-      <div id="status" class="status">Status: loading...</div>
+      <h1>{{ app_name }}</h1>
+      <div id="status" class="status">Status: {{ status }} ({{ count }} items)</div>
 
       <div class="row">
         <button id="btnReload" type="button">Reload</button>
