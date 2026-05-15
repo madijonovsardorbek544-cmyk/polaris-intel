@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
@@ -60,12 +61,25 @@ def _dt(value: Any) -> str | None:
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
+def parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def source_status(health: SourceHealth) -> str:
     if health.last_error:
         return "failing"
-    if health.last_empty_at and (not health.last_success_at or health.last_empty_at > health.last_success_at):
+    last_empty = parse_iso_datetime(health.last_empty_at)
+    last_success = parse_iso_datetime(health.last_success_at)
+    if last_empty and (not last_success or last_empty > last_success):
         return "empty"
-    if health.last_success_at:
+    if last_success or health.last_success_at:
         return "healthy"
     return "pending"
 

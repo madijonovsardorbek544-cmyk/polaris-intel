@@ -1,8 +1,8 @@
 # POLARIS Intel
 
-POLARIS Intel is a **first customer pilot SaaS foundation** for an explainable cyber-geopolitical intelligence dashboard. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches items against customer watchlists, persists an alert workflow, and presents pilot-ready intelligence in a FastAPI/Jinja2 dashboard.
+POLARIS Intel is a **usable first pilot operator product** for an explainable cyber-geopolitical intelligence dashboard. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches items against customer watchlists, persists an alert workflow, and presents pilot-ready intelligence in a FastAPI/Jinja2 dashboard.
 
-POLARIS is **not enterprise-grade yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is intended to support first customer pilot validation and controlled deployments with honest limitations.
+POLARIS is **not enterprise-grade yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is intended to support first pilot-operator workflows and controlled deployments with honest limitations.
 
 ## What is implemented
 
@@ -23,7 +23,7 @@ POLARIS is **not enterprise-grade yet**. It does not claim to be an AI analyst, 
 - Persistent alert workflow with `open`, `acknowledged`, and `resolved` statuses plus notes.
 - Telegram-ready alert message formatting, without real bot delivery yet.
 - Daily brief endpoint with top risks, affected countries/sectors, recommended actions, source failures, and empty sources.
-- Responsive dashboard panels for source health, risk factors, watchlist badges, alerts, and daily brief.
+- Responsive dashboard panels for source health, risk factors, watchlist badges, alerts, daily brief, watchlist management, and persistent alert workflow actions.
 - Tests for API endpoints, `.env` loading, source failure logging, factors, alerts, daily brief, watchlist update, scoring, entities, deduplication, and Telegram alert formatting.
 
 ## What is still future work
@@ -82,6 +82,9 @@ Create a local `.env` file if you want to override defaults:
 
 ```env
 POLARIS_API_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+PORT=8000
 DATABASE_URL=
 MAX_ITEMS=60
 AUTO_REFRESH_SECONDS=900
@@ -91,6 +94,9 @@ LOG_LEVEL=INFO
 ```
 
 - `POLARIS_API_KEY`: optional API key for write operations. If empty, demo-mode writes are allowed. If set, write requests must include `X-Polaris-API-Key: <key>`.
+- `TELEGRAM_BOT_TOKEN`: reserved for future Telegram delivery; preview formatting does not send messages.
+- `TELEGRAM_CHAT_ID`: reserved for future Telegram delivery; preview formatting does not send messages.
+- `PORT`: default HTTP port for deployment commands; `.env.example` sets `PORT=8000`.
 - `DATABASE_URL`: when set, POLARIS uses PostgreSQL and creates/updates required tables at startup.
 - `MAX_ITEMS`: maximum number of intelligence items returned/stored in memory.
 - `AUTO_REFRESH_SECONDS`: background refresh interval.
@@ -98,7 +104,7 @@ LOG_LEVEL=INFO
 - `FEEDS`: optional comma-separated RSS feed override. If empty, built-in cyber and world-news feeds are used.
 - `LOG_LEVEL`: standard Python logging level.
 
-`PORT` is also respected by deployment platforms, although it is not required for local `uvicorn src.main:app --reload` usage.
+The environment block above intentionally matches `.env.example` exactly.
 
 ## Demo mode vs database mode
 
@@ -136,6 +142,7 @@ These endpoints require `X-Polaris-API-Key` when `POLARIS_API_KEY` is configured
 - `POST /api/seed`
 - `POST /api/alerts/generate`
 - `PATCH /api/alerts/{id}`
+- `POST /api/alerts/{id}/telegram-preview`
 
 Read-only endpoints are not blocked.
 
@@ -150,7 +157,7 @@ Read-only endpoints are not blocked.
 
 - `GET /api/latest` — latest intelligence items, kept for backward compatibility.
 - `GET /api/items` — filterable intelligence items.
-  - Query params: `q`, `category`, `risk_level`, `country`, `sector`, `limit`.
+  - Query params: `q`, `category`, `risk_level`, `country`, `sector`, `org_id`, `limit`.
 - `GET /api/items/{id}` — one intelligence item by ID.
 - `GET /api/stats` — counts by category/risk plus top countries and sectors.
 - `GET /api/summary` — short executive summary and top high-priority items.
@@ -187,7 +194,7 @@ Source status rules:
 ### Watchlists
 
 - `POST /api/watchlists` — create a watchlist.
-- `GET /api/watchlists` — list watchlists.
+- `GET /api/watchlists` — list watchlists. Optional query param: `org_id`.
 - `GET /api/watchlists/{id}` — retrieve watchlist detail.
 - `PUT /api/watchlists/{id}` — replace/update a watchlist while keeping the same ID and creation timestamp.
 - `DELETE /api/watchlists/{id}` — delete a watchlist.
@@ -209,10 +216,12 @@ Example watchlist payload:
 
 ### Alerts
 
-- `GET /api/alerts` — returns persisted alerts if they exist; otherwise returns generated Critical/High watchlist-matched alert previews.
+- `GET /api/alerts` — returns both persisted alerts and generated Critical/High watchlist-matched previews in one object. Optional query param: `org_id`.
+- `GET /api/alerts/flat` — compatibility endpoint returning the old flat list behavior: persisted alerts when present, otherwise generated previews. Optional query param: `org_id`.
 - `GET /api/alerts/{id}` — retrieve one persisted or generated alert.
-- `POST /api/alerts/generate` — persist alert records for current Critical/High watchlist-matched items.
+- `POST /api/alerts/generate` — persist alert records for current Critical/High watchlist-matched items and return `ok`, `created`, `existing`, and `alerts`.
 - `PATCH /api/alerts/{id}` — update alert `status` and/or `notes`.
+- `POST /api/alerts/{id}/telegram-preview` — return the Telegram-formatted alert message without sending anything.
 
 Each alert includes:
 
@@ -232,7 +241,7 @@ Each alert includes:
 
 ### Daily brief
 
-- `GET /api/brief/daily` — pilot-friendly summary for analyst review.
+- `GET /api/brief/daily` — pilot-friendly summary for analyst review. Optional query param: `org_id`.
 
 The response includes:
 
