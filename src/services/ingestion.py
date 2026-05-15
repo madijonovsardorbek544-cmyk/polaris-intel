@@ -3,12 +3,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
-
 from ..config import settings
-from ..database import deduplicate_items, list_items, list_source_health, list_watchlists, record_source_failure, record_source_success, replace_memory_items, save_items
+from ..database import (
+    deduplicate_items,
+    list_items,
+    list_watchlists,
+    record_source_empty,
+    record_source_failure,
+    record_source_success,
+    replace_memory_items,
+    save_items,
+)
 from ..feeds import parse_feed
 from ..models import IntelligenceItem
 from .analysis import analyze_item, now_iso
@@ -19,7 +27,16 @@ _LOCK = asyncio.Lock()
 logger = logging.getLogger(__name__)
 
 
-async def fetch_feed(client: object, feed_url: str) -> list[IntelligenceItem]:
+@dataclass
+class FeedFetchResult:
+    feed_url: str
+    items: list[IntelligenceItem]
+    ok: bool
+    error: str | None
+    empty: bool
+
+
+async def fetch_feed_result(client: object, feed_url: str) -> FeedFetchResult:
     try:
         response = await client.get(
             feed_url,
@@ -31,31 +48,24 @@ async def fetch_feed(client: object, feed_url: str) -> list[IntelligenceItem]:
         entries = parse_feed(response.text, feed_url)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
-        logger.warning(
-            "Feed fetch failed url=%s error_type=%s message=%s",
-            feed_url,
-            type(exc).__name__,
-            str(exc),
-        )
+        logger.warning("Feed fetch failed url=%s error_type=%s message=%s", feed_url, type(exc).__name__, str(exc))
         await record_source_failure(feed_url, now_iso(), error)
-        return []
+        return FeedFetchResult(feed_url=feed_url, items=[], ok=False, error=error, empty=False)
+
+    if not entries:
+        await record_source_empty(feed_url, now_iso())
+        logger.info("Feed fetch returned no entries url=%s", feed_url)
+        return FeedFetchResult(feed_url=feed_url, items=[], ok=True, error=None, empty=True)
 
     await record_source_success(feed_url, now_iso())
     watchlists = await list_watchlists()
-    return [
-        analyze_item(entry["title"], entry["summary"], entry["source_url"], watchlists, entry["created_at"])
-        for entry in entries
-    ]
+    items = [analyze_item(entry["title"], entry["summary"], entry["source_url"], watchlists, entry["created_at"]) for entry in entries]
+    return FeedFetchResult(feed_url=feed_url, items=items, ok=True, error=None, empty=False)
 
 
-async def fetch_feed_result(client: object, feed_url: str) -> dict[str, object]:
-    items = await fetch_feed(client, feed_url)
-    failed = False
-    for source in await list_source_health():
-        if source.source_url == feed_url and source.last_error:
-            failed = True
-            break
-    return {"items": items, "failed": failed}
+async def fetch_feed(client: object, feed_url: str) -> list[IntelligenceItem]:
+    """Backward-compatible feed fetch API returning only analyzed items."""
+    return (await fetch_feed_result(client, feed_url)).items
 
 
 async def refresh_store(force: bool = False) -> dict[str, Any]:
@@ -76,28 +86,35 @@ async def refresh_store(force: bool = False) -> dict[str, Any]:
 
     merged: list[IntelligenceItem] = []
     for result in feed_results:
-        merged.extend(result["items"])
+        merged.extend(result.items)
 
     merged = deduplicate_items(merged)
     merged.sort(key=lambda item: (item.risk_score, item.ingested_at), reverse=True)
     merged = merged[: settings.max_items]
 
-    failed_feeds = sum(1 for result in feed_results if result["failed"])
+    failed_feeds = sum(1 for result in feed_results if not result.ok)
+    empty_feeds = sum(1 for result in feed_results if result.empty)
 
     if merged:
         await save_items(merged)
         _LAST_REFRESH_STATUS = "OK"
-        logger.info("Feed refresh success items=%s failed_feeds=%s", len(merged), failed_feeds)
+        logger.info("Feed refresh success items=%s failed_feeds=%s empty_feeds=%s", len(merged), failed_feeds, empty_feeds)
     else:
         existing = await list_items(settings.max_items)
         await replace_memory_items(existing)
         _LAST_REFRESH_STATUS = "OK" if existing else "EMPTY"
         if existing:
-            logger.info("Feed refresh success from cache items=%s failed_feeds=%s", len(existing), failed_feeds)
+            logger.info("Feed refresh success from cache items=%s failed_feeds=%s empty_feeds=%s", len(existing), failed_feeds, empty_feeds)
         else:
-            logger.warning("Feed refresh empty failed_feeds=%s", failed_feeds)
+            logger.warning("Feed refresh empty failed_feeds=%s empty_feeds=%s", failed_feeds, empty_feeds)
 
-    return {"ok": True, "status": _LAST_REFRESH_STATUS, "items": len(await list_items(settings.max_items)), "failed_feeds": failed_feeds}
+    return {
+        "ok": True,
+        "status": _LAST_REFRESH_STATUS,
+        "items": len(await list_items(settings.max_items)),
+        "failed_feeds": failed_feeds,
+        "empty_feeds": empty_feeds,
+    }
 
 
 async def seed_demo_items() -> list[IntelligenceItem]:

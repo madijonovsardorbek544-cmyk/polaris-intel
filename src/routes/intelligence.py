@@ -3,15 +3,17 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ..auth import require_api_key
 from ..config import settings
-from ..database import get_item, list_items, list_source_health
-from ..services.briefing import generate_alerts, generate_daily_brief
+from ..database import get_alert, get_item, list_alerts, list_items, list_source_health, save_alerts, update_alert
+from ..schemas import AlertUpdate
+from ..services.analysis import now_iso
+from ..services.briefing import alert_to_dict, alerts_from_items, generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_store, seed_demo_items
 
 router = APIRouter(prefix="/api")
-
 
 
 @router.get("/latest")
@@ -51,12 +53,12 @@ async def item_detail(item_id: str) -> dict[str, object]:
     return item_to_dict(item)
 
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(require_api_key)])
 async def refresh() -> dict[str, object]:
     return await refresh_store(force=True)
 
 
-@router.post("/seed")
+@router.post("/seed", dependencies=[Depends(require_api_key)])
 async def seed() -> dict[str, object]:
     seeded = await seed_demo_items()
     return {"ok": True, "seeded": len(seeded)}
@@ -69,7 +71,37 @@ async def sources() -> list[dict[str, object]]:
 
 @router.get("/alerts")
 async def alerts() -> list[dict[str, object]]:
+    persisted = await list_alerts()
+    if persisted:
+        return [alert_to_dict(alert) for alert in persisted]
     return generate_alerts(await list_items(settings.max_items))
+
+
+@router.get("/alerts/{alert_id}")
+async def alert_detail(alert_id: str) -> dict[str, object]:
+    alert = await get_alert(alert_id)
+    if not alert:
+        generated = generate_alerts(await list_items(settings.max_items))
+        for candidate in generated:
+            if candidate["id"] == alert_id:
+                return candidate
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return alert_to_dict(alert)
+
+
+@router.post("/alerts/generate", dependencies=[Depends(require_api_key)])
+async def generate_persistent_alerts() -> dict[str, object]:
+    before = await list_alerts()
+    saved = await save_alerts(alerts_from_items(await list_items(settings.max_items)))
+    return {"ok": True, "generated": max(0, len(saved) - len(before)), "alerts": [alert_to_dict(alert) for alert in saved]}
+
+
+@router.patch("/alerts/{alert_id}", dependencies=[Depends(require_api_key)])
+async def patch_alert(alert_id: str, payload: AlertUpdate) -> dict[str, object]:
+    alert = await update_alert(alert_id, status=payload.status, notes=payload.notes, updated_at=now_iso())
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return alert_to_dict(alert)
 
 
 @router.get("/brief/daily")

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
+from ..auth import require_api_key
 from ..database import add_watchlist, delete_watchlist, get_watchlist, list_watchlists, update_watchlist
 from ..models import Watchlist
 from ..schemas import WatchlistCreate, WatchlistOut
@@ -20,6 +21,7 @@ def _from_payload(payload: WatchlistCreate, *, watchlist_id: str, created_at: st
     return Watchlist(
         id=watchlist_id,
         name=payload.name.strip(),
+        org_id=payload.org_id.strip() or "demo",
         countries=_clean(payload.countries),
         sectors=_clean(payload.sectors),
         organizations=_clean(payload.organizations),
@@ -30,7 +32,7 @@ def _from_payload(payload: WatchlistCreate, *, watchlist_id: str, created_at: st
     )
 
 
-@router.post("", response_model=WatchlistOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=WatchlistOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_api_key)])
 async def create_watchlist(payload: WatchlistCreate) -> Watchlist:
     watchlist = _from_payload(payload, watchlist_id=str(uuid.uuid4()), created_at=now_iso())
     return await add_watchlist(watchlist)
@@ -49,7 +51,7 @@ async def watchlist_detail(watchlist_id: str) -> Watchlist:
     return watchlist
 
 
-@router.put("/{watchlist_id}", response_model=WatchlistOut)
+@router.put("/{watchlist_id}", response_model=WatchlistOut, dependencies=[Depends(require_api_key)])
 async def replace_watchlist(watchlist_id: str, payload: WatchlistCreate) -> Watchlist:
     existing = await get_watchlist(watchlist_id)
     if not existing:
@@ -61,7 +63,7 @@ async def replace_watchlist(watchlist_id: str, payload: WatchlistCreate) -> Watc
     return saved
 
 
-@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_api_key)])
 async def remove_watchlist(watchlist_id: str) -> Response:
     if not await delete_watchlist(watchlist_id):
         raise HTTPException(status_code=404, detail="Watchlist not found")

@@ -118,3 +118,33 @@ def test_watchlist_update_and_detail() -> None:
     assert after.countries == ["Ukraine"]
 
     asyncio.run(delete_watchlist(watchlist_id))
+
+
+def test_empty_feed_tracks_empty_status_separately() -> None:
+    from src.database import list_source_health, reset_memory_state
+    from src.services.ingestion import fetch_feed_result
+
+    class EmptyResponse:
+        text = "<rss><channel></channel></rss>"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class EmptyClient:
+        async def get(self, *_args: object, **_kwargs: object) -> object:
+            return EmptyResponse()
+
+    async def run() -> tuple[object, object]:
+        await reset_memory_state()
+        result = await fetch_feed_result(EmptyClient(), "https://empty.example/rss.xml")  # type: ignore[arg-type]
+        health = [source for source in await list_source_health() if source.source_url == "https://empty.example/rss.xml"][0]
+        return result, health
+
+    result, health = asyncio.run(run())
+
+    assert result.ok is True
+    assert result.empty is True
+    assert health.status == "empty"
+    assert health.empty_count == 1
+    assert health.total_failure_count == 0
+    assert health.consecutive_failure_count == 0

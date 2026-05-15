@@ -9,6 +9,7 @@ class WatchlistMatchOut(BaseModel):
     matched_on: str
     matched_value: str
     reason: str
+    org_id: str = "demo"
 
 
 class IntelligenceItemOut(BaseModel):
@@ -36,6 +37,7 @@ class IntelligenceItemOut(BaseModel):
 
 class WatchlistCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
+    org_id: str = Field(default="demo", min_length=1, max_length=80)
     countries: list[str] = Field(default_factory=list)
     sectors: list[str] = Field(default_factory=list)
     organizations: list[str] = Field(default_factory=list)
@@ -53,15 +55,30 @@ class SourceHealthOut(BaseModel):
     source_url: str
     last_success_at: str | None = None
     last_failure_at: str | None = None
-    failure_count: int = 0
+    last_empty_at: str | None = None
+    total_failure_count: int = 0
+    consecutive_failure_count: int = 0
+    empty_count: int = 0
     last_error: str | None = None
+    status: str = "pending"
 
 
 class AlertOut(BaseModel):
+    id: str
     item_id: str
     title: str
     risk_level: str
-    matched_watchlist: str
+    matched_watchlist_id: str
+    matched_watchlist_name: str
     reason: str
     recommended_action: str
+    status: str = "open"
     created_at: str
+    updated_at: str
+    notes: str | None = None
+    org_id: str = "demo"
+
+
+class AlertUpdate(BaseModel):
+    status: str | None = Field(default=None, pattern="^(open|acknowledged|resolved)$")
+    notes: str | None = Field(default=None, max_length=2000)
