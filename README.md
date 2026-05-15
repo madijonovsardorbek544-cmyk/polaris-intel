@@ -1,42 +1,32 @@
 # POLARIS Intel
 
-POLARIS Intel is a **usable first pilot operator product** for an explainable cyber-geopolitical intelligence dashboard. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches items against customer watchlists, persists an alert workflow, and presents pilot-ready intelligence in a FastAPI/Jinja2 dashboard.
+POLARIS Intel is a **single-org pilot deployment product** for explainable cyber-geopolitical intelligence. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches intelligence against operator watchlists, persists alerts, and presents a FastAPI/Jinja2 dashboard for controlled pilot deployments.
 
-POLARIS is **not enterprise-grade yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is intended to support first pilot-operator workflows and controlled deployments with honest limitations.
+POLARIS is **not enterprise-grade multi-tenant SaaS yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is built for one pilot organization at a time, with honest limits and simple operator controls.
 
 ## What is implemented
 
 - FastAPI application with Jinja2 dashboard.
-- `.env`-based local configuration via `python-dotenv` support.
+- `.env`-based local configuration via `python-dotenv` support when installed.
 - RSS ingestion with typed feed fetch results and explicit failed/empty feed tracking.
 - Optional PostgreSQL persistence for intelligence items, watchlists, source health, and alerts.
-- In-memory mode for fast local demos when `DATABASE_URL` is not set.
+- In-memory demo mode when `DATABASE_URL` is not set.
 - Entity extraction for CVEs, selected countries/blocs, sectors, and cyber terms.
-- Deterministic item classification: `Cyber`, `Geopolitics`, `Hybrid`, or `General`.
-- Explainable scoring fields:
-  - `risk_factors`, for example `CISA source reliability +22`, `CVE detected +15`, `Watchlist match +12`.
-  - `confidence_factors`, for example source corroboration, structured entity detection, and summary clarity.
+- Deterministic item classification, risk scoring, confidence scoring, and explainability factors.
 - Watchlists for countries, sectors, organizations, keywords, CVEs, and threat actors.
-- Tenant-ready `org_id` fields on watchlists, alerts, and watchlist matches. The default org is `demo`.
-- Minimal API-key protection for write operations using `POLARIS_API_KEY` and `X-Polaris-API-Key`.
-- Watchlist match explanations showing which watchlist matched and why.
+- Tenant-ready `org_id` fields on watchlists, alerts, and watchlist matches.
+- Single-org deployment defaults through `POLARIS_DEFAULT_ORG`.
+- Dashboard Active `org_id` context so operator reads use one visible org filter.
+- API-key protection for write operations using `POLARIS_API_KEY` and `X-Polaris-API-Key`.
+- Optional API-key protection for read operations with `POLARIS_PROTECT_READS=true`.
 - Persistent alert workflow with `open`, `acknowledged`, and `resolved` statuses plus notes.
-- Telegram-ready alert message formatting, without real bot delivery yet.
+- Alert preview generation, persistent alert generation, and Telegram message preview without sending.
 - Daily brief endpoint with top risks, affected countries/sectors, recommended actions, source failures, and empty sources.
-- Responsive dashboard panels for source health, risk factors, watchlist badges, alerts, daily brief, watchlist management, and persistent alert workflow actions.
-- Tests for API endpoints, `.env` loading, source failure logging, factors, alerts, daily brief, watchlist update, scoring, entities, deduplication, and Telegram alert formatting.
+- Demo reset endpoint for in-memory pilot demos only.
 
 ## What is still future work
 
-- Full authentication, authorization, tenant isolation, and role-based access control.
-- Billing, subscriptions, and customer self-service administration.
-- Analyst assignments, queues, SLAs, escalation policies, and production case management.
-- Production monitoring, metrics, tracing, alerting, backups, rate limits, and disaster recovery.
-- Real notification delivery: Telegram bot, email, Slack, Teams, webhook, Jira, ServiceNow.
-- Stronger source normalization, feed quality controls, and source-specific parsers.
-- Customer-specific scoring calibration and explainability tuning.
-- Enterprise deployment hardening: managed migrations, observability, secrets handling, and SSO.
-- Human-reviewed intelligence production process and legal/compliance review.
+Before a real paid pilot, POLARIS still needs full multi-tenant SaaS isolation, real user login, role-based access control, billing/subscriptions, production monitoring and alerting, backups, rate limits, real Telegram sending, analyst queues, assignment workflows, escalation policies, and a stronger operational security review.
 
 ## Project structure
 
@@ -82,6 +72,8 @@ Create a local `.env` file if you want to override defaults:
 
 ```env
 POLARIS_API_KEY=
+POLARIS_PROTECT_READS=false
+POLARIS_DEFAULT_ORG=demo
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 PORT=8000
@@ -93,10 +85,12 @@ FEEDS=
 LOG_LEVEL=INFO
 ```
 
-- `POLARIS_API_KEY`: optional API key for write operations. If empty, demo-mode writes are allowed. If set, write requests must include `X-Polaris-API-Key: <key>`.
+- `POLARIS_API_KEY`: optional API key. If empty, demo writes are allowed. If set, protected requests must include `X-Polaris-API-Key: <key>`.
+- `POLARIS_PROTECT_READS`: default `false`. When `true` and `POLARIS_API_KEY` is set, read endpoints require `X-Polaris-API-Key` too.
+- `POLARIS_DEFAULT_ORG`: default single-org context for the dashboard and omitted watchlist `org_id` values. Defaults to `demo`.
 - `TELEGRAM_BOT_TOKEN`: reserved for future Telegram delivery; preview formatting does not send messages.
 - `TELEGRAM_CHAT_ID`: reserved for future Telegram delivery; preview formatting does not send messages.
-- `PORT`: default HTTP port for deployment commands; `.env.example` sets `PORT=8000`.
+- `PORT`: default HTTP port for deployment commands.
 - `DATABASE_URL`: when set, POLARIS uses PostgreSQL and creates/updates required tables at startup.
 - `MAX_ITEMS`: maximum number of intelligence items returned/stored in memory.
 - `AUTO_REFRESH_SECONDS`: background refresh interval.
@@ -106,13 +100,30 @@ LOG_LEVEL=INFO
 
 The environment block above intentionally matches `.env.example` exactly.
 
+## Dashboard org context
+
+The dashboard sidebar has an **Active org_id** input. It defaults to `POLARIS_DEFAULT_ORG`, stores the current value in `sessionStorage`, displays the active org near the top of the dashboard, and reloads dashboard data when changed.
+
+Dashboard read calls include the active org where supported:
+
+- `/api/items?org_id=<activeOrg>`
+- `/api/alerts?org_id=<activeOrg>`
+- `/api/brief/daily?org_id=<activeOrg>`
+- `/api/watchlists?org_id=<activeOrg>`
+
+Watchlist creation also defaults to the active org. This avoids mixed-org dashboard data during a single-org pilot.
+
 ## Demo mode vs database mode
 
 ### Demo/in-memory mode
 
-If `DATABASE_URL` is empty, POLARIS runs without PostgreSQL. Items, source health, watchlists, and alerts are stored in process memory and reset when the server restarts. This is the easiest local pilot-demo mode.
+If `DATABASE_URL` is empty, POLARIS runs without PostgreSQL. Items, source health, watchlists, and alerts are stored in process memory and reset when the server restarts.
 
-If `POLARIS_API_KEY` is empty, write endpoints remain open for demo use. Set `POLARIS_API_KEY` before exposing a pilot instance.
+Demo mode also enables:
+
+- `POST /api/demo/reset` — protected by `POLARIS_API_KEY` when configured. It clears in-memory items, watchlists, source health, and alerts for live demo resets without restarting the server.
+
+If `DATABASE_URL` is set, `POST /api/demo/reset` returns HTTP 400 with `Demo reset is disabled in database mode.`
 
 ### PostgreSQL mode
 
@@ -128,12 +139,14 @@ Example:
 ```bash
 export DATABASE_URL='postgresql://postgres:postgres@localhost:5432/polaris'
 export POLARIS_API_KEY='replace-me'
+export POLARIS_PROTECT_READS=true
+export POLARIS_DEFAULT_ORG='pilot-customer'
 uvicorn src.main:app --reload
 ```
 
-## API-key protected write operations
+## API-key protection
 
-These endpoints require `X-Polaris-API-Key` when `POLARIS_API_KEY` is configured:
+Write endpoints require `X-Polaris-API-Key` when `POLARIS_API_KEY` is configured:
 
 - `POST /api/watchlists`
 - `PUT /api/watchlists/{id}`
@@ -143,23 +156,32 @@ These endpoints require `X-Polaris-API-Key` when `POLARIS_API_KEY` is configured
 - `POST /api/alerts/generate`
 - `PATCH /api/alerts/{id}`
 - `POST /api/alerts/{id}/telegram-preview`
+- `POST /api/demo/reset`
 
-Read-only endpoints are not blocked.
+Read endpoints are public by default. If `POLARIS_PROTECT_READS=true` and `POLARIS_API_KEY` is set, these read endpoints require the same header:
+
+- `GET /api/items`
+- `GET /api/alerts`
+- `GET /api/brief/daily`
+- `GET /api/sources`
+- `GET /api/watchlists`
+
+`GET /health` remains public and never exposes the actual API key.
 
 ## API endpoints
 
 ### System
 
 - `GET /` — dashboard UI rendered from `src/templates/index.html`.
-- `GET /health` — service health, feed count, item count, storage mode.
+- `GET /health` — service health with storage mode, API-key configuration flag, read-protection flag, default org, feed count, item count, alert count, and source count.
+- `POST /api/demo/reset` — demo-memory reset. Protected by API key. Disabled in database mode.
 
 ### Intelligence
 
 - `GET /api/latest` — latest intelligence items, kept for backward compatibility.
-- `GET /api/items` — filterable intelligence items.
-  - Query params: `q`, `category`, `risk_level`, `country`, `sector`, `org_id`, `limit`.
+- `GET /api/items` — filterable intelligence items. Query params: `q`, `category`, `risk_level`, `country`, `sector`, `org_id`, `limit`.
 - `GET /api/items/{id}` — one intelligence item by ID.
-- `GET /api/stats` — counts by category/risk plus top countries and sectors.
+- `GET /api/stats` — compatibility stats endpoint. The dashboard derives visible stats from active-org items.
 - `GET /api/summary` — short executive summary and top high-priority items.
 - `POST /api/refresh` — force RSS refresh.
 - `POST /api/seed` — load deterministic sample intelligence items.
@@ -167,22 +189,6 @@ Read-only endpoints are not blocked.
 ### Source health
 
 - `GET /api/sources` — source health records.
-
-Example response item:
-
-```json
-{
-  "source_url": "https://www.cisa.gov/news-events/alerts.xml",
-  "last_success_at": "2026-05-15T12:00:00+00:00",
-  "last_failure_at": null,
-  "last_empty_at": null,
-  "total_failure_count": 0,
-  "consecutive_failure_count": 0,
-  "empty_count": 0,
-  "last_error": null,
-  "status": "healthy"
-}
-```
 
 Source status rules:
 
@@ -193,7 +199,7 @@ Source status rules:
 
 ### Watchlists
 
-- `POST /api/watchlists` — create a watchlist.
+- `POST /api/watchlists` — create a watchlist. Omitted `org_id` defaults to `POLARIS_DEFAULT_ORG`.
 - `GET /api/watchlists` — list watchlists. Optional query param: `org_id`.
 - `GET /api/watchlists/{id}` — retrieve watchlist detail.
 - `PUT /api/watchlists/{id}` — replace/update a watchlist while keeping the same ID and creation timestamp.
@@ -216,42 +222,18 @@ Example watchlist payload:
 
 ### Alerts
 
-- `GET /api/alerts` — returns both persisted alerts and generated Critical/High watchlist-matched previews in one object. Optional query param: `org_id`.
-- `GET /api/alerts/flat` — compatibility endpoint returning the old flat list behavior: persisted alerts when present, otherwise generated previews. Optional query param: `org_id`.
+- `GET /api/alerts` — returns `persisted` alerts and `generated_preview` alerts separately. Optional query param: `org_id`.
+- `GET /api/alerts/flat` — compatibility endpoint returning the old flat list behavior.
 - `GET /api/alerts/{id}` — retrieve one persisted or generated alert.
-- `POST /api/alerts/generate` — persist alert records for current Critical/High watchlist-matched items and return `ok`, `created`, `existing`, and `alerts`.
+- `POST /api/alerts/generate` — persist alert records for current Critical/High watchlist-matched items. Returns `ok`, `created`, `existing`, `created_alerts`, and `alerts`.
 - `PATCH /api/alerts/{id}` — update alert `status` and/or `notes`.
 - `POST /api/alerts/{id}/telegram-preview` — return the Telegram-formatted alert message without sending anything.
 
-Each alert includes:
-
-- `id`
-- `item_id`
-- `title`
-- `risk_level`
-- `matched_watchlist_id`
-- `matched_watchlist_name`
-- `reason`
-- `recommended_action`
-- `status`
-- `created_at`
-- `updated_at`
-- `notes`
-- `org_id`
+The dashboard can generate persistent alerts, filter persisted/preview alerts, search title/reason/watchlist text, edit alert notes/status, and preview Telegram formatting. It does **not** send Telegram messages.
 
 ### Daily brief
 
 - `GET /api/brief/daily` — pilot-friendly summary for analyst review. Optional query param: `org_id`.
-
-The response includes:
-
-- `headline_summary`
-- `top_5_risks`
-- `countries_affected`
-- `sectors_affected`
-- `recommended_actions`
-- `source_failures`
-- `empty_sources`
 
 ## Testing
 
@@ -259,15 +241,16 @@ The response includes:
 pytest -q
 ```
 
-The suite covers scoring, entity extraction, watchlist matching, `.env` loading, source failure logging, explainability factors, alert generation and persistence, daily brief generation, watchlist CRUD endpoints, API endpoint smoke tests, deduplication, and Telegram alert formatting. Tests use isolated in-memory state and do not require real network calls.
+The suite covers scoring, entity extraction, watchlist matching, `.env` loading, source failure logging, explainability factors, alert generation and persistence counts, daily brief generation, watchlist CRUD endpoints, API endpoint smoke tests, deduplication, optional read protection, default org behavior, demo reset behavior, dashboard control smoke tests, and Telegram alert formatting. Tests use isolated in-memory state and do not require real network calls.
 
 ## Deployment notes
 
 A simple pilot deployment should:
 
 1. Install `requirements.txt`.
-2. Set environment variables, especially `DATABASE_URL` for persistence and `POLARIS_API_KEY` for write protection.
-3. Run with a production ASGI server command such as:
+2. Set environment variables, especially `POLARIS_API_KEY`, `POLARIS_DEFAULT_ORG`, and normally `DATABASE_URL` for persistence.
+3. Consider `POLARIS_PROTECT_READS=true` before exposing a pilot instance beyond a trusted demo environment.
+4. Run with a production ASGI server command such as:
 
 ```bash
 uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}

@@ -122,6 +122,7 @@ def test_alert_generation_counts_created_and_existing() -> None:
     assert first.status_code == 200
     assert first.json()["created"] == 1
     assert first.json()["existing"] == 0
+    assert len(first.json()["created_alerts"]) == 1
 
     second = c.post("/api/alerts/generate")
     assert second.status_code == 200
@@ -215,3 +216,121 @@ def test_dashboard_html_smoke(monkeypatch) -> None:
     assert "Alerts" in html
     assert "Source health" in html
     assert "Admin API key" in html
+
+
+def test_dashboard_single_org_controls_exist(monkeypatch) -> None:
+    async def fake_refresh_store(force: bool = False) -> dict[str, object]:
+        return {"ok": True, "status": "TEST", "items": 0}
+
+    monkeypatch.setattr("src.main.refresh_store", fake_refresh_store)
+    response = _client().get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert "Active org_id" in html
+    assert "polarisActiveOrg" in html
+    assert "/api/items?${orgQuery()}" in html
+    assert "/api/alerts?${orgQuery()}" in html
+    assert "/api/brief/daily?${orgQuery()}" in html
+    assert "/api/watchlists?${orgQuery()}" in html
+
+
+def test_dashboard_watchlist_edit_alert_generation_and_telegram_controls(monkeypatch) -> None:
+    async def fake_refresh_store(force: bool = False) -> dict[str, object]:
+        return {"ok": True, "status": "TEST", "items": 0}
+
+    monkeypatch.setattr("src.main.refresh_store", fake_refresh_store)
+    html = _client().get("/").text
+    assert "data-watchlist-edit" in html
+    assert "Save watchlist" in html
+    assert "Generate persistent alerts" in html
+    assert "Created ${payload.created || 0} alerts, ${payload.existing || 0} already existed." in html
+    assert "Preview — not persisted" in html
+    assert "Telegram preview" in html
+    assert "telegram-preview" in html
+
+
+def test_optional_read_protection_requires_key_when_enabled(monkeypatch) -> None:
+    protected = replace(settings, api_key="read-secret", protect_reads=True)
+    monkeypatch.setattr(auth, "settings", protected)
+    c = _client()
+
+    for path in ["/api/items", "/api/alerts", "/api/brief/daily", "/api/sources", "/api/watchlists"]:
+        assert c.get(path).status_code == 401
+        assert c.get(path, headers={"X-Polaris-API-Key": "read-secret"}).status_code == 200
+    assert c.get("/health").status_code == 200
+
+
+def test_read_endpoints_remain_public_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(auth, "settings", replace(settings, api_key="write-secret", protect_reads=False))
+    c = _client()
+    for path in ["/api/items", "/api/alerts", "/api/brief/daily", "/api/sources", "/api/watchlists"]:
+        assert c.get(path).status_code == 200
+
+
+def test_default_org_applies_to_omitted_watchlist_org(monkeypatch) -> None:
+    custom = replace(settings, default_org="pilot-org")
+    monkeypatch.setattr("src.routes.watchlists.settings", custom)
+    monkeypatch.setattr("src.schemas.settings", custom)
+
+    response = _client().post("/api/watchlists", json={"name": "Default org watchlist"})
+
+    assert response.status_code == 201
+    assert response.json()["org_id"] == "pilot-org"
+
+
+def test_save_alerts_with_counts_does_not_count_old_alerts() -> None:
+    async def run() -> tuple[int, int, int, int]:
+        from src.database import save_alerts_with_counts
+
+        existing = Alert(
+            id="existing-alert",
+            item_id="old-item",
+            title="Old",
+            risk_level="High",
+            matched_watchlist_id="wl-old",
+            matched_watchlist_name="Old",
+            reason="old reason",
+            recommended_action="Review.",
+            created_at=now_iso(),
+            updated_at=now_iso(),
+        )
+        await save_alerts([existing])
+        first = Alert(
+            id="new-alert",
+            item_id="new-item",
+            title="New",
+            risk_level="Critical",
+            matched_watchlist_id="wl-new",
+            matched_watchlist_name="New",
+            reason="new reason",
+            recommended_action="Escalate.",
+            created_at=now_iso(),
+            updated_at=now_iso(),
+        )
+        result = await save_alerts_with_counts([first])
+        duplicate = await save_alerts_with_counts([first])
+        return result.created_count, result.existing_count, len(result.all_alerts), duplicate.existing_count
+
+    created_count, existing_count, total_count, duplicate_existing = asyncio.run(run())
+    assert created_count == 1
+    assert existing_count == 0
+    assert total_count == 2
+    assert duplicate_existing == 1
+
+
+def test_demo_reset_endpoint_only_in_demo_mode(monkeypatch) -> None:
+    monkeypatch.setattr("src.database.settings", replace(settings, database_url=""))
+    monkeypatch.setattr("src.routes.intelligence.settings", replace(settings, database_url=""))
+    c = _client()
+    created = c.post("/api/watchlists", json={"name": "Reset me", "org_id": "demo"})
+    assert created.status_code == 201
+    reset = c.post("/api/demo/reset")
+    assert reset.status_code == 200
+    assert c.get("/api/watchlists").json() == []
+
+
+def test_demo_reset_returns_400_in_database_mode(monkeypatch) -> None:
+    monkeypatch.setattr("src.database.settings", replace(settings, database_url="postgresql://example/db"))
+    response = _client().post("/api/demo/reset")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Demo reset is disabled in database mode."

@@ -4,7 +4,8 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from ..auth import require_api_key
+from ..auth import require_api_key, require_read_api_key
+from ..config import settings
 from ..database import add_watchlist, delete_watchlist, get_watchlist, list_watchlists, update_watchlist
 from ..models import Watchlist
 from ..schemas import WatchlistCreate, WatchlistOut
@@ -21,7 +22,7 @@ def _from_payload(payload: WatchlistCreate, *, watchlist_id: str, created_at: st
     return Watchlist(
         id=watchlist_id,
         name=payload.name.strip(),
-        org_id=payload.org_id.strip() or "demo",
+        org_id=payload.org_id.strip() or settings.default_org,
         countries=_clean(payload.countries),
         sectors=_clean(payload.sectors),
         organizations=_clean(payload.organizations),
@@ -38,7 +39,7 @@ async def create_watchlist(payload: WatchlistCreate) -> Watchlist:
     return await add_watchlist(watchlist)
 
 
-@router.get("", response_model=list[WatchlistOut])
+@router.get("", response_model=list[WatchlistOut], dependencies=[Depends(require_read_api_key)])
 async def get_watchlists(org_id: str | None = None) -> list[Watchlist]:
     watchlists = await list_watchlists()
     if org_id:

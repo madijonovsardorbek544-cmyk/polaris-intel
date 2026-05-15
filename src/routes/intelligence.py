@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from ..auth import require_api_key
+from ..auth import require_api_key, require_read_api_key
 from ..config import settings
-from ..database import get_alert, get_item, list_alerts, list_items, list_source_health, save_alerts, update_alert
+from ..database import database_enabled, get_alert, get_item, list_alerts, list_items, list_source_health, reset_memory_state, save_alerts_with_counts, update_alert
 from ..models import Alert, IntelligenceItem
 from ..schemas import AlertUpdate
 from ..services.analysis import now_iso
@@ -36,7 +36,7 @@ async def latest() -> list[dict[str, object]]:
     return [item_to_dict(item) for item in await list_items(settings.max_items)]
 
 
-@router.get("/items")
+@router.get("/items", dependencies=[Depends(require_read_api_key)])
 async def items(
     q: str | None = None,
     category: str | None = None,
@@ -82,12 +82,12 @@ async def seed() -> dict[str, object]:
     return {"ok": True, "seeded": len(seeded)}
 
 
-@router.get("/sources")
+@router.get("/sources", dependencies=[Depends(require_read_api_key)])
 async def sources() -> list[dict[str, object]]:
     return [asdict(source) for source in await list_source_health()]
 
 
-@router.get("/alerts")
+@router.get("/alerts", dependencies=[Depends(require_read_api_key)])
 async def alerts(org_id: str | None = None) -> dict[str, object]:
     persisted = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     generated_preview = [alert for alert in generate_alerts(await list_items(settings.max_items)) if _alert_matches_org(alert, org_id)]
@@ -120,14 +120,19 @@ async def alert_detail(alert_id: str) -> dict[str, object]:
 
 
 @router.post("/alerts/generate", dependencies=[Depends(require_api_key)])
-async def generate_persistent_alerts() -> dict[str, object]:
-    before = await list_alerts()
-    before_keys = {(alert.item_id, alert.matched_watchlist_id, alert.reason) for alert in before}
-    candidates = alerts_from_items(await list_items(settings.max_items))
-    created = sum(1 for alert in candidates if (alert.item_id, alert.matched_watchlist_id, alert.reason) not in before_keys)
-    existing = len(candidates) - created
-    saved = await save_alerts(candidates) if candidates else await list_alerts()
-    return {"ok": True, "created": created, "existing": existing, "alerts": [alert_to_dict(alert) for alert in saved]}
+async def generate_persistent_alerts(org_id: str | None = None) -> dict[str, object]:
+    all_items = await list_items(settings.max_items)
+    if org_id:
+        all_items = [item for item in all_items if _item_matches_org(item, org_id)]
+    candidates = alerts_from_items(all_items)
+    result = await save_alerts_with_counts(candidates)
+    return {
+        "ok": True,
+        "created": result.created_count,
+        "existing": result.existing_count,
+        "created_alerts": [alert_to_dict(alert) for alert in result.created_alerts],
+        "alerts": [alert_to_dict(alert) for alert in result.all_alerts],
+    }
 
 
 @router.patch("/alerts/{alert_id}", dependencies=[Depends(require_api_key)])
@@ -146,7 +151,15 @@ async def telegram_preview(alert_id: str) -> dict[str, object]:
     return {"message": format_alert_for_telegram(alert)}
 
 
-@router.get("/brief/daily")
+@router.post("/demo/reset", dependencies=[Depends(require_api_key)])
+async def demo_reset() -> dict[str, object]:
+    if database_enabled():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Demo reset is disabled in database mode.")
+    await reset_memory_state()
+    return {"ok": True, "detail": "Demo memory state reset."}
+
+
+@router.get("/brief/daily", dependencies=[Depends(require_read_api_key)])
 async def daily_brief(org_id: str | None = None) -> dict[str, object]:
     all_items = await list_items(settings.max_items)
     if org_id:

@@ -57,6 +57,7 @@ async def home(request: Request) -> HTMLResponse:
             "version": settings.app_version,
             "items_count": len(items),
             "status": refresh_status(),
+            "default_org": settings.default_org,
         },
     )
 
