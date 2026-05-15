@@ -4,6 +4,8 @@
 
 Live demo: https://polaris-intel.onrender.com
 
+The public demo opens in **Global Intelligence** mode so visitors can see live risk items immediately. **Org Watchlist** mode is for customer-specific matching after adding watchlists.
+
 POLARIS Intel is a **single-org pilot deployment product** for explainable cyber-geopolitical intelligence. It ingests RSS feeds, extracts observable risk signals, tracks source health, applies deterministic risk and confidence scoring, matches intelligence against operator watchlists, persists alerts, and presents a FastAPI/Jinja2 dashboard for controlled pilot deployments.
 
 POLARIS is **not enterprise-grade multi-tenant SaaS yet**. It does not claim to be an AI analyst, SOAR platform, SIEM replacement, or fully managed threat-intelligence product. This version is built for one pilot organization at a time, with honest limits and simple operator controls.
@@ -20,7 +22,7 @@ POLARIS is **not enterprise-grade multi-tenant SaaS yet**. It does not claim to 
 - Watchlists for countries, sectors, organizations, keywords, CVEs, and threat actors.
 - Tenant-ready `org_id` fields on watchlists, alerts, and watchlist matches.
 - Single-org deployment defaults through `POLARIS_DEFAULT_ORG`.
-- Dashboard Active `org_id` context so operator reads use one visible org filter.
+- Dashboard **Global Intelligence** and **Org Watchlist** view modes so public demos show global items immediately while operator reads can still use one visible org filter.
 - API-key protection for write operations using `POLARIS_API_KEY` and `X-Polaris-API-Key`.
 - Optional API-key protection for read operations with `POLARIS_PROTECT_READS=true`.
 - Persistent alert workflow with `open`, `acknowledged`, and `resolved` statuses plus notes.
@@ -104,11 +106,13 @@ LOG_LEVEL=INFO
 
 The environment block above intentionally matches `.env.example` exactly.
 
-## Dashboard org context
+## Dashboard view modes and org context
+
+The dashboard has a visible **Global Intelligence / Org Watchlist** toggle. Global Intelligence calls read endpoints without `org_id` filtering, while Org Watchlist adds the active `org_id` for customer-specific matching.
 
 The dashboard sidebar has an **Active org_id** input. It defaults to `POLARIS_DEFAULT_ORG`, stores the current value in `sessionStorage`, displays the active org near the top of the dashboard, and reloads dashboard data when changed.
 
-Dashboard read calls include the active org where supported:
+Org Watchlist dashboard read calls include the active org where supported:
 
 - `/api/items?org_id=<activeOrg>`
 - `/api/alerts?org_id=<activeOrg>`
@@ -374,7 +378,7 @@ After deployment:
 4. Save.
 5. Keep the same URL in README under Live Demo.
 
-Replace the README placeholder line `Live demo: Coming soon. Deploy using the instructions below.` with your deployed Render URL, for example `Live demo: https://your-service-name.onrender.com`.
+The live demo URL is published at the top of this README. Update that line if you redeploy under a different Render service name.
 
 ## Pilot customer workflow upgrade
 

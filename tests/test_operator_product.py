@@ -216,6 +216,11 @@ def test_dashboard_html_smoke(monkeypatch) -> None:
     assert "Alerts" in html
     assert "Source health" in html
     assert "Admin API key" in html
+    assert "No org-specific matches yet" in html
+    assert "Switch to Global Intelligence" in html
+    assert 'downloadCsv(exportUrl("/api/export/alerts.csv")' in html
+    assert 'fetch(url, { headers: adminHeaders(), cache: "no-store" })' in html
+    assert "window.location" not in html
 
 
 def test_dashboard_single_org_controls_exist(monkeypatch) -> None:
@@ -228,10 +233,15 @@ def test_dashboard_single_org_controls_exist(monkeypatch) -> None:
     html = response.text
     assert "Active org_id" in html
     assert "polarisActiveOrg" in html
-    assert "/api/items?${orgQuery()}" in html
-    assert "/api/alerts?${orgQuery()}" in html
-    assert "/api/brief/daily?${orgQuery()}" in html
-    assert "/api/watchlists?${orgQuery()}" in html
+    assert "POLARIS Public Demo" in html
+    assert "Global Intelligence" in html
+    assert "Org Watchlist" in html
+    assert "polarisViewMode" in html
+    assert "currentViewMode()" in html
+    assert 'scopedUrl("/api/items")' in html
+    assert 'state.viewMode === "org" ? `${base}?${orgQuery()}` : base' in html
+    assert 'safeJsonFetch(scopedUrl("/api/items")' in html
+    assert "safeJsonFetch(`/api/watchlists?${orgQuery()}`" in html
 
 
 def test_dashboard_watchlist_edit_alert_generation_and_telegram_controls(monkeypatch) -> None:
@@ -258,6 +268,49 @@ def test_optional_read_protection_requires_key_when_enabled(monkeypatch) -> None
         assert c.get(path).status_code == 401
         assert c.get(path, headers={"X-Polaris-API-Key": "read-secret"}).status_code == 200
     assert c.get("/health").status_code == 200
+
+
+
+def test_public_demo_stats_reports_global_and_org_counts(monkeypatch) -> None:
+    _set_api_key(monkeypatch, "")
+
+    async def seed() -> None:
+        demo = Watchlist(id="wl-stats", name="Stats", org_id="demo", countries=["Ukraine"], sectors=["energy"])
+        await add_watchlist(demo)
+        item = analyze_item(
+            "CISA warns CVE-2026-30303 is actively exploited in energy systems",
+            "A critical exploit affects energy providers in Ukraine.",
+            "https://www.cisa.gov/news-events/alerts/public-demo-stats",
+            [demo],
+        )
+        await save_items([item])
+        await save_alerts([*intelligence.alerts_from_items([item])])
+
+    asyncio.run(seed())
+    response = _client().get("/api/public-demo-stats", params={"org_id": "demo"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["global_items"] > 0
+    for key in ["global_items", "org_items", "org_watchlists", "sources", "last_status"]:
+        assert key in payload
+    assert payload["org_items"] == 1
+    assert payload["org_watchlists"] == 1
+
+
+def test_public_demo_stats_respects_read_protection(monkeypatch) -> None:
+    protected = replace(settings, api_key="read-secret", protect_reads=True)
+    monkeypatch.setattr(auth, "settings", protected)
+    c = _client()
+
+    assert c.get("/api/public-demo-stats").status_code == 401
+    assert c.get("/api/public-demo-stats", headers={"X-Polaris-API-Key": "read-secret"}).status_code == 200
+
+
+def test_head_routes_return_200() -> None:
+    c = _client()
+    assert c.head("/").status_code == 200
+    assert c.head("/health").status_code == 200
 
 
 def test_read_endpoints_remain_public_by_default(monkeypatch) -> None:
