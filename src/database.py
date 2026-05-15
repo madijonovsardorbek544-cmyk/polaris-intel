@@ -1034,7 +1034,13 @@ async def add_item_feedback(feedback: ItemFeedback) -> ItemFeedback:
     return feedback
 
 
-async def list_item_feedback(limit: int = 200) -> list[ItemFeedback]:
+async def list_item_feedback(
+    limit: int = 200,
+    *,
+    org_id: str | None = None,
+    item_id: str | None = None,
+    relevance: str | None = None,
+) -> list[ItemFeedback]:
     if database_enabled():
         def run() -> list[ItemFeedback]:
             with _psycopg().connect(settings.database_url) as conn:
@@ -1042,11 +1048,23 @@ async def list_item_feedback(limit: int = 200) -> list[ItemFeedback]:
                     cur.execute(
                         """
                         SELECT id, item_id, relevance, severity_feedback, org_id, comment, created_at
-                        FROM item_feedback ORDER BY created_at DESC LIMIT %s;
+                        FROM item_feedback
+                        WHERE (%s IS NULL OR org_id = %s)
+                          AND (%s IS NULL OR item_id = %s)
+                          AND (%s IS NULL OR relevance = %s)
+                        ORDER BY created_at DESC
+                        LIMIT %s;
                         """,
-                        (limit,),
+                        (org_id, org_id, item_id, item_id, relevance, relevance, limit),
                     )
                     return [_feedback_from_row(row) for row in cur.fetchall()]
         return await asyncio.to_thread(run)
     async with _LOCK:
-        return list(_FEEDBACK[:limit])
+        rows = [
+            feedback
+            for feedback in _FEEDBACK
+            if (org_id is None or feedback.org_id == org_id)
+            and (item_id is None or feedback.item_id == item_id)
+            and (relevance is None or feedback.relevance == relevance)
+        ]
+        return list(rows[:limit])

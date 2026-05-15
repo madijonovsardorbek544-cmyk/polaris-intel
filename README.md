@@ -450,14 +450,14 @@ Exports are protected by optional read protection when `POLARIS_PROTECT_READS=tr
 
 ### Telegram sending
 
-Telegram previews remain available. Real sending is enabled safely with:
+Telegram preview works without credentials, so operators can inspect the exact message before enabling delivery. Telegram sending requires both:
 
 ```bash
 TELEGRAM_BOT_TOKEN=<bot-token>
 TELEGRAM_CHAT_ID=<chat-id>
 ```
 
-Use `POST /api/alerts/{id}/telegram-send` with the write API key. If either variable is missing, POLARIS returns a clear `400` and records a `telegram_failed` event. Tokens and chat IDs are never shown in the dashboard.
+Use `POST /api/alerts/{id}/telegram-send` with the write API key. If either variable is missing, POLARIS returns a clear `400` and records a `telegram_failed` event. Tokens are never shown in the dashboard. Tests must mock Telegram HTTP calls and must never send real Telegram messages.
 
 ### Source configuration
 
@@ -489,17 +489,22 @@ Use `GET /api/org-profile?org_id=<org_id>` and `PUT /api/org-profile?org_id=<org
 
 In-memory demo mode is only appropriate for the public demo and local product walkthroughs. Because Render web services can restart or scale, in-memory data can disappear. For real pilots, create a Render PostgreSQL instance and set `DATABASE_URL` on the web service so pilot leads, watchlists, alerts, feedback, public metrics, and customer proof inputs persist.
 
-### Pilot deployment checklist
+### Real pilot deployment checklist
 
 1. Set `POLARIS_API_KEY` to a strong secret.
 2. Set `POLARIS_PROTECT_READS=true` for real customer deployments.
-3. Set `DATABASE_URL` from Render PostgreSQL.
-4. Set `POLARIS_DEFAULT_ORG` to the pilot customer org slug.
-5. Add a watchlist from the dashboard First pilot setup wizard.
-6. Generate alerts from the dashboard.
-7. Test `/health` after deploy.
-8. Submit a test lead from `/request-pilot`.
-9. Export the customer proof report from the dashboard.
+3. Add Render PostgreSQL to the service.
+4. Set `DATABASE_URL` from Render PostgreSQL.
+5. Set `POLARIS_DEFAULT_ORG` to the pilot customer org slug.
+6. Confirm `/health` shows `database=true`.
+7. Submit a test lead from `/request-pilot`.
+8. Create a watchlist from the dashboard First pilot setup wizard.
+9. Generate alerts from the dashboard.
+10. Check the customer proof report in the dashboard.
+11. Export the proof report.
+12. Test Telegram preview/send if `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` exist.
+
+Demo-memory mode is only for the public demo and local walkthroughs. Real pilots must use PostgreSQL. Do not use public demo memory mode for customer data.
 
 ### New pilot acquisition endpoints
 
