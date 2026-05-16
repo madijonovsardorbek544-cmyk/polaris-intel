@@ -10,7 +10,7 @@ from ..models import CveEnrichment, IntelCluster, IntelEdge, IntelEntity, Intell
 from ..scoring import CYBER_RISK_TERMS
 from .analysis import now_iso
 
-EXPLOIT_REPORTED_TERMS = ("actively exploited", "known exploited")
+EXPLOIT_REPORTED_TERMS = ("actively exploited", "known exploited", "in the wild")
 
 
 def stable_id(*parts: str, length: int = 18) -> str:

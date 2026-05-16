@@ -178,7 +178,7 @@ class CveEnrichment:
     patch_status: str = "unknown"
     enriched_at: str = ""
     sources: list[str] = field(default_factory=list)
-    last_refresh_attempt_at: str = ""
+    last_refresh_attempt_at: str | None = None
     refresh_status: str = "pending"
     last_error: str | None = None
     nvd_last_modified: str | None = None
