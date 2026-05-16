@@ -14,6 +14,20 @@ class WatchlistMatchOut(BaseModel):
     org_id: str = "demo"
 
 
+class CveEnrichmentOut(BaseModel):
+    cve_id: str
+    severity: str | None = None
+    cvss_score: float | None = None
+    epss_score: float | None = None
+    cisa_kev: bool = False
+    affected_products: list[str] = Field(default_factory=list)
+    vendor_advisory_links: list[str] = Field(default_factory=list)
+    exploit_status: str = "unknown"
+    patch_status: str = "unknown"
+    enriched_at: str = ""
+    sources: list[str] = Field(default_factory=list)
+
+
 class IntelligenceItemOut(BaseModel):
     id: str
     title: str
@@ -39,6 +53,9 @@ class IntelligenceItemOut(BaseModel):
     source_type: str = "custom"
     evidence_links: list[str] = Field(default_factory=list)
     evidence_summary: str = ""
+    cve_enrichments: list[CveEnrichmentOut] = Field(default_factory=list)
+    cluster_id: str | None = None
+    cluster_title: str | None = None
 
 
 class WatchlistCreate(BaseModel):

@@ -534,16 +534,49 @@ uvicorn src.main:app --reload
 
 Then open `/dashboard`, add the API key in the Admin API key field, review the **Pilot readiness** panel, create or update a watchlist, click **Run rematch**, generate alerts, assign an owner, and confirm the customer proof report is populated.
 
-## Current limits compared to Recorded Future
 
-POLARIS is an early pilot-oriented intelligence workflow product, not a full Recorded Future replacement. Current known limits:
+## Toward Recorded Future-style intelligence
+
+POLARIS now has a first serious intelligence layer beyond item listing. It is still intentionally deterministic and explainable for controlled pilot demos, but it can model relationships between risks, evidence, entities, sources, watchlists, clusters, and analyst review work.
+
+Implemented layers today:
+
+- **RSS source monitoring**: configured feeds are ingested, source health is tracked, and source reliability/type metadata is attached to items.
+- **Explainable scoring**: each item keeps `risk_factors` and `confidence_factors` so operators can see why risk and confidence changed.
+- **Source reliability and evidence fields**: source domains, evidence links, and evidence summaries are returned with intelligence items.
+- **CVE enrichment v1**: `POST /api/cves/enrich` scans current items for CVEs and stores deterministic offline enrichment records with severity, exploitation status, CISA KEV placeholder logic, patch status, and sources. Read with `GET /api/cves` and `GET /api/cves/{cve_id}`.
+- **Entity graph v1**: `POST /api/graph/rebuild` derives CVE, country, sector, source, watchlist, and alert entities plus relationship edges. Read with `GET /api/graph/entities`, `GET /api/graph/edges`, and `GET /api/graph/entity/{entity_id}`.
+- **Incident clustering v1**: `POST /api/clusters/rebuild` groups items sharing CVEs, similar normalized titles, or deterministic country/sector/cyber-term patterns. Clusters expose corroboration levels: `single_source`, `multi_source`, and `strong`.
+- **Confidence corroboration**: multi-source clusters add confidence factors without inflating risk score; strong clusters with 3+ sources add a stronger confidence factor.
+- **Review queue v1**: `POST /api/review/generate` creates analyst review items for critical items, reported exploited CVEs, strongly corroborated clusters, false-positive feedback, and high-risk claims from low-reliability sources. Read with `GET /api/review`; update with `PATCH /api/review/{review_id}`.
+- **Intelligence maturity endpoint**: `GET /api/intelligence-maturity` returns an honest 0-100 score, per-layer levels, blocking gaps, and next actions.
+- **Customer proof reports**: `/api/reports/customer-proof` now includes CVEs tracked/enriched, clusters detected, multi-source clusters, review items, false-positive feedback, and intelligence maturity score.
+
+Honest limitations remain:
 
 - No dark web collection.
-- No CVE enrichment pipeline yet.
-- No entity graph or relationship exploration yet.
-- No real multi-tenant authentication or per-user authorization yet.
-- No billing, metering, or subscription management.
+- No paid threat feeds.
+- No full NVD/EPSS integration yet.
+- No ML entity resolution yet.
+- No real multi-tenant user authentication yet.
+- No SIEM, SOAR, ticketing, SSO, or case-management integrations yet.
 - No analyst team producing finished intelligence.
-- No enterprise integrations such as SIEM, SOAR, SSO, ticketing, or case-management connectors.
 
-These limits should be disclosed honestly in pilot conversations. POLARIS is currently strongest as a lightweight RSS-backed risk monitoring, watchlist matching, alert workflow, and customer proof reporting system for first design partners.
+Recommended local intelligence-layer workflow:
+
+```bash
+pytest -q
+uvicorn src.main:app --reload
+```
+
+Then, in a separate terminal or API client, run these after ingestion or seeding:
+
+```bash
+curl -X POST http://localhost:8000/api/cves/enrich -H "X-Polaris-API-Key: <key>"
+curl -X POST http://localhost:8000/api/graph/rebuild -H "X-Polaris-API-Key: <key>"
+curl -X POST http://localhost:8000/api/clusters/rebuild -H "X-Polaris-API-Key: <key>"
+curl -X POST http://localhost:8000/api/review/generate -H "X-Polaris-API-Key: <key>"
+curl http://localhost:8000/api/intelligence-maturity -H "X-Polaris-API-Key: <key>"
+```
+
+For Render redeploys, push the committed branch, confirm the Render service uses the same start command (`uvicorn src.main:app --host 0.0.0.0 --port $PORT` or the existing `Procfile`), and verify environment variables: `POLARIS_API_KEY`, `POLARIS_PROTECT_READS=true`, `DATABASE_URL`, and `POLARIS_DEFAULT_ORG`.

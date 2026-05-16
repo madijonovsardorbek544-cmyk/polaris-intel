@@ -159,3 +159,67 @@ class AdminAuditEvent:
     org_id: str | None = None
     message: str = ""
     created_at: str = ""
+
+@dataclass
+class CveEnrichment:
+    cve_id: str
+    severity: str | None = None
+    cvss_score: float | None = None
+    epss_score: float | None = None
+    cisa_kev: bool = False
+    affected_products: list[str] = field(default_factory=list)
+    vendor_advisory_links: list[str] = field(default_factory=list)
+    exploit_status: str = "unknown"
+    patch_status: str = "unknown"
+    enriched_at: str = ""
+    sources: list[str] = field(default_factory=list)
+
+
+@dataclass
+class IntelEntity:
+    id: str
+    type: str
+    value: str
+    display_name: str
+    first_seen_at: str
+    last_seen_at: str
+
+
+@dataclass
+class IntelEdge:
+    id: str
+    source_entity_id: str
+    target_entity_id: str
+    relationship: str
+    evidence_item_id: str | None = None
+    weight: float = 1.0
+    created_at: str = ""
+
+
+@dataclass
+class IntelCluster:
+    id: str
+    title: str
+    summary: str
+    item_ids: list[str] = field(default_factory=list)
+    source_domains: list[str] = field(default_factory=list)
+    risk_level: str = "Low"
+    confidence_score: int = 0
+    first_seen_at: str = ""
+    last_seen_at: str = ""
+    key_entities: list[str] = field(default_factory=list)
+    corroboration_level: str = "single_source"
+    evidence_count: int = 0
+
+
+@dataclass
+class ReviewQueueItem:
+    id: str
+    item_id: str
+    cluster_id: str | None = None
+    org_id: str | None = None
+    priority: str = "medium"
+    reason: str = ""
+    status: str = "pending"
+    created_at: str = ""
+    updated_at: str = ""

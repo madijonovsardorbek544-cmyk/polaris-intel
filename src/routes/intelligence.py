@@ -12,12 +12,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 
 from ..auth import require_api_key, require_read_api_key
 from ..config import settings
-from ..database import add_admin_audit_event, add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_admin_audit_events, list_alert_events, list_alerts, list_item_feedback, list_items, list_pilot_leads, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, save_items, update_alert, update_pilot_lead_status, update_source_config
+from ..database import add_admin_audit_event, add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_cve_enrichment, get_intel_cluster, get_intel_entity, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_admin_audit_events, list_alert_events, list_alerts, list_cve_enrichments, list_intel_clusters, list_intel_edges, list_intel_entities, list_item_feedback, list_items, list_pilot_leads, list_review_queue, list_source_configs, list_source_health, list_watchlists, put_org_profile, replace_intel_clusters, replace_intel_graph, reset_memory_state, save_alerts_with_counts, save_cve_enrichment, save_items, save_review_queue_item, update_alert, update_pilot_lead_status, update_review_queue_item, update_source_config
 from ..models import AdminAuditEvent, Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
 from ..schemas import AlertUpdate, ItemFeedbackCreate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
 from ..services.analysis import analyze_item, now_iso
 from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_status, refresh_store, seed_demo_items
+from ..services.intelligence_layers import apply_cluster_confidence, attach_enrichments, build_clusters, build_cve_enrichments, build_graph, generate_review_items, item_cves, maturity_score
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,19 @@ async def _dashboard_check(name: str, operation) -> tuple[str, dict[str, object]
         return name, {"ok": False, "error": type(exc).__name__}, f"{name} failed: {type(exc).__name__}"
 
 
+
+async def _enrichment_map() -> dict[str, object]:
+    return {record.cve_id: record for record in await list_cve_enrichments(limit=1000)}
+
+
+async def _item_output(item: IntelligenceItem) -> dict[str, object]:
+    return attach_enrichments(item, await _enrichment_map(), await list_intel_clusters(limit=1000))
+
+
+async def _items_output(items: list[IntelligenceItem]) -> list[dict[str, object]]:
+    enrichments = await _enrichment_map()
+    clusters = await list_intel_clusters(limit=1000)
+    return [attach_enrichments(item, enrichments, clusters) for item in items]
 
 
 @router.post("/leads", status_code=status.HTTP_201_CREATED)
@@ -253,7 +267,7 @@ async def audit_events(org_id: str | None = Query(default=None, min_length=1, ma
 
 @router.get("/latest", dependencies=[Depends(require_read_api_key)])
 async def latest() -> list[dict[str, object]]:
-    return [item_to_dict(item) for item in await list_items(settings.max_items)]
+    return await _items_output(await list_items(settings.max_items))
 
 
 @router.get("/items", dependencies=[Depends(require_read_api_key)])
@@ -280,7 +294,7 @@ async def items(
         results = [item for item in results if country.lower() in {c.lower() for c in item.affected_countries}]
     if sector:
         results = [item for item in results if sector.lower() in {s.lower() for s in item.affected_sectors}]
-    return [item_to_dict(item) for item in results]
+    return await _items_output(results)
 
 
 @router.get("/items/{item_id}", dependencies=[Depends(require_read_api_key)])
@@ -288,7 +302,7 @@ async def item_detail(item_id: str) -> dict[str, object]:
     item = await get_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Intelligence item not found")
-    return item_to_dict(item)
+    return await _item_output(item)
 
 
 @router.post("/refresh", dependencies=[Depends(require_api_key)])
@@ -442,6 +456,138 @@ async def daily_brief(org_id: str | None = None) -> dict[str, object]:
         all_items = [item for item in all_items if _item_matches_org(item, org_id)]
     return generate_daily_brief(all_items, await list_source_health())
 
+@router.get("/cves", dependencies=[Depends(require_read_api_key)])
+async def cves(limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str, object]]:
+    return [asdict(record) for record in await list_cve_enrichments(limit)]
+
+
+@router.get("/cves/{cve_id}", dependencies=[Depends(require_read_api_key)])
+async def cve_detail(cve_id: str) -> dict[str, object]:
+    record = await get_cve_enrichment(cve_id.upper())
+    if not record:
+        raise HTTPException(status_code=404, detail="CVE enrichment not found")
+    return asdict(record)
+
+
+@router.post("/cves/enrich", dependencies=[Depends(require_api_key)])
+async def enrich_cves() -> dict[str, object]:
+    records = build_cve_enrichments(await list_items(settings.max_items))
+    for record in records:
+        await save_cve_enrichment(record)
+    await _audit("cve_enrichment", "cve_enrichment", "all", message=f"Enriched {len(records)} CVEs from current items.")
+    return {"ok": True, "enriched": len(records), "cves": [record.cve_id for record in records]}
+
+
+@router.post("/graph/rebuild", dependencies=[Depends(require_api_key)])
+async def rebuild_graph() -> dict[str, object]:
+    entities, edges = build_graph(await list_items(settings.max_items), await list_watchlists(), await list_alerts(), await list_source_health())
+    await replace_intel_graph(entities, edges)
+    await _audit("graph_rebuild", "intel_graph", "all", message=f"Rebuilt graph with {len(entities)} entities and {len(edges)} edges.")
+    return {"ok": True, "entities": len(entities), "edges": len(edges)}
+
+
+@router.get("/graph/entities", dependencies=[Depends(require_read_api_key)])
+async def graph_entities(entity_type: str | None = None, limit: int = Query(default=500, ge=1, le=2000)) -> list[dict[str, object]]:
+    return [asdict(entity) for entity in await list_intel_entities(limit, entity_type=entity_type)]
+
+
+@router.get("/graph/edges", dependencies=[Depends(require_read_api_key)])
+async def graph_edges(limit: int = Query(default=1000, ge=1, le=3000)) -> list[dict[str, object]]:
+    return [asdict(edge) for edge in await list_intel_edges(limit)]
+
+
+@router.get("/graph/entity/{entity_id}", dependencies=[Depends(require_read_api_key)])
+async def graph_entity(entity_id: str) -> dict[str, object]:
+    entity = await get_intel_entity(entity_id)
+    if not entity:
+        raise HTTPException(status_code=404, detail="Entity not found")
+    edges = [edge for edge in await list_intel_edges(limit=3000) if entity_id in {edge.source_entity_id, edge.target_entity_id}]
+    return {"entity": asdict(entity), "edges": [asdict(edge) for edge in edges]}
+
+
+@router.post("/clusters/rebuild", dependencies=[Depends(require_api_key)])
+async def rebuild_clusters() -> dict[str, object]:
+    all_items = await list_items(settings.max_items)
+    clusters = build_clusters(all_items)
+    await replace_intel_clusters(clusters)
+    changed = apply_cluster_confidence(all_items, clusters)
+    if changed:
+        await save_items(changed)
+    await _audit("cluster_rebuild", "intel_cluster", "all", message=f"Rebuilt {len(clusters)} incident clusters.")
+    return {"ok": True, "clusters": len(clusters), "confidence_updated": len(changed)}
+
+
+@router.get("/clusters", dependencies=[Depends(require_read_api_key)])
+async def clusters(limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str, object]]:
+    return [asdict(cluster) for cluster in await list_intel_clusters(limit)]
+
+
+@router.get("/clusters/{cluster_id}", dependencies=[Depends(require_read_api_key)])
+async def cluster_detail(cluster_id: str) -> dict[str, object]:
+    cluster = await get_intel_cluster(cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    items_by_id = {item.id: item for item in await list_items(settings.max_items)}
+    return {"cluster": asdict(cluster), "items": [item_to_dict(items_by_id[item_id]) for item_id in cluster.item_ids if item_id in items_by_id]}
+
+
+@router.post("/review/generate", dependencies=[Depends(require_api_key)])
+async def generate_review_queue() -> dict[str, object]:
+    enrichments = await _enrichment_map()
+    reviews = generate_review_items(await list_items(settings.max_items), enrichments, await list_intel_clusters(limit=1000), await list_item_feedback(limit=1000))
+    existing = {review.id for review in await list_review_queue(limit=5000)}
+    created = 0
+    for review in reviews:
+        if review.id not in existing:
+            created += 1
+        await save_review_queue_item(review)
+    await _audit("review_generate", "review_queue", "all", message=f"Generated {created} new review items.")
+    return {"ok": True, "created": created, "total_candidates": len(reviews)}
+
+
+@router.get("/review", dependencies=[Depends(require_read_api_key)])
+async def review_queue(status_filter: str | None = Query(default=None, alias="status"), limit: int = Query(default=200, ge=1, le=500)) -> list[dict[str, object]]:
+    return [asdict(item) for item in await list_review_queue(limit=limit, status=status_filter)]
+
+
+@router.patch("/review/{review_id}", dependencies=[Depends(require_api_key)])
+async def patch_review(review_id: str, payload: dict[str, object]) -> dict[str, object]:
+    status_value = payload.get("status") if isinstance(payload, dict) else None
+    priority_value = payload.get("priority") if isinstance(payload, dict) else None
+    allowed_status = {"pending", "reviewed", "dismissed", "escalated"}
+    allowed_priority = {"low", "medium", "high", "urgent"}
+    if status_value is not None and status_value not in allowed_status:
+        raise HTTPException(status_code=422, detail="Invalid review status")
+    if priority_value is not None and priority_value not in allowed_priority:
+        raise HTTPException(status_code=422, detail="Invalid review priority")
+    review = await update_review_queue_item(review_id, status=status_value, priority=priority_value, reason=payload.get("reason") if isinstance(payload.get("reason"), str) else None, updated_at=now_iso())
+    if not review:
+        raise HTTPException(status_code=404, detail="Review item not found")
+    await _audit("review_patch", "review_queue", review_id, org_id=review.org_id, message=f"Review status is {review.status}.")
+    return asdict(review)
+
+
+@router.get("/intelligence-maturity", dependencies=[Depends(require_read_api_key)])
+async def intelligence_maturity() -> dict[str, object]:
+    entities = await list_intel_entities(limit=1)
+    edges = await list_intel_edges(limit=1)
+    clusters_ = await list_intel_clusters(limit=1)
+    reviews = await list_review_queue(limit=1)
+    cves_ = await list_cve_enrichments(limit=1)
+    return maturity_score({
+        "sources": len(await list_source_health()),
+        "cves": len(cves_),
+        "entities": len(entities),
+        "edges": len(edges),
+        "clusters": len(clusters_),
+        "reviews": len(reviews),
+        "watchlists": len(await list_watchlists()),
+        "alerts": len(await list_alerts()),
+        "database": database_enabled(),
+        "api_key": bool(settings.api_key.strip()),
+        "protect_reads": bool(settings.protect_reads),
+    })
+
 
 @router.get("/stats", dependencies=[Depends(require_read_api_key)])
 async def stats() -> dict[str, object]:
@@ -559,9 +705,17 @@ async def customer_proof_report(org_id: str = Query(..., min_length=1), days: in
     resolved_alerts = [alert for alert in alerts_for_org if alert.status in {"resolved", "false_positive"}]
     health = Counter(source.status for source in sources)
     source_summary = {"total_sources": len(sources) or len(settings.feeds), "healthy": health.get("healthy", 0), "failing": health.get("failing", 0), "empty": health.get("empty", 0), "pending": health.get("pending", 0)}
+    cves_tracked_values = sorted({cve for item in items for cve in item_cves(item)})
+    enriched_cves_count = len(await list_cve_enrichments(limit=1000))
+    clusters_for_items = [cluster for cluster in await list_intel_clusters(limit=1000) if any(item_id in {item.id for item in items} for item_id in cluster.item_ids)]
+    review_items = await list_review_queue(limit=1000)
+    false_positive_feedback_count = len(await list_item_feedback(limit=1000, org_id=org_id, relevance="false_positive"))
+    maturity = await intelligence_maturity()
+    clustered_item_count = len({item_id for cluster in clusters_for_items for item_id in cluster.item_ids})
     proof_summary = (
-        f"POLARIS monitored {len(items)} risk signals from {source_summary['total_sources']} sources, "
-        f"matched {len(alerts_for_org)} alerts to your organization, and produced {len(actions)} recommended actions this week."
+        f"POLARIS monitored {len(items)} risk signals, enriched {enriched_cves_count} CVEs, "
+        f"grouped {clustered_item_count} items into {len(clusters_for_items)} incident clusters, "
+        f"and generated {len(review_items)} review items for your organization."
     )
     return {
         "org_id": org_id,
@@ -574,6 +728,13 @@ async def customer_proof_report(org_id: str = Query(..., min_length=1), days: in
         "top_3_risks": top_risks,
         "top_3_recommended_actions": actions,
         "source_health_summary": source_summary,
+        "cves_tracked": len(cves_tracked_values),
+        "enriched_cves": enriched_cves_count,
+        "clusters_detected": len(clusters_for_items),
+        "multi_source_clusters": len([cluster for cluster in clusters_for_items if cluster.corroboration_level in {"multi_source", "strong"}]),
+        "review_items_created": len(review_items),
+        "false_positive_feedback_count": false_positive_feedback_count,
+        "intelligence_maturity_score": maturity["score"],
         "proof_summary": proof_summary,
     }
 
