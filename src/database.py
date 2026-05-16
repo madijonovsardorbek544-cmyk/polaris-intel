@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
-from .models import AdminAuditEvent, Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, PublicMetrics, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
+from .models import AdminAuditEvent, Alert, AlertEvent, CveEnrichment, IntelCluster, IntelEdge, IntelEntity, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, PublicMetrics, ReviewQueueItem, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
 
 _ITEMS: list[IntelligenceItem] = []
 _WATCHLISTS: list[Watchlist] = []
@@ -20,6 +20,11 @@ _PILOT_LEADS: list[PilotLead] = []
 _PUBLIC_METRICS = PublicMetrics()
 _FEEDBACK: list[ItemFeedback] = []
 _AUDIT_EVENTS: list[AdminAuditEvent] = []
+_CVE_ENRICHMENTS: dict[str, CveEnrichment] = {}
+_GRAPH_ENTITIES: dict[str, IntelEntity] = {}
+_GRAPH_EDGES: dict[str, IntelEdge] = {}
+_CLUSTERS: dict[str, IntelCluster] = {}
+_REVIEW_QUEUE: dict[str, ReviewQueueItem] = {}
 _LOCK = asyncio.Lock()
 
 
@@ -300,6 +305,49 @@ async def init_db() -> None:
                         org_id TEXT,
                         message TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMPTZ NOT NULL
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS cve_enrichments (
+                        cve_id TEXT PRIMARY KEY,
+                        severity TEXT,
+                        cvss_score DOUBLE PRECISION,
+                        epss_score DOUBLE PRECISION,
+                        cisa_kev BOOLEAN NOT NULL DEFAULT FALSE,
+                        affected_products JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        vendor_advisory_links JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        exploit_status TEXT NOT NULL DEFAULT 'unknown',
+                        patch_status TEXT NOT NULL DEFAULT 'unknown',
+                        enriched_at TIMESTAMPTZ NOT NULL,
+                        sources JSONB NOT NULL DEFAULT '[]'::jsonb
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS intel_entities (
+                        id TEXT PRIMARY KEY, type TEXT NOT NULL, value TEXT NOT NULL, display_name TEXT NOT NULL,
+                        first_seen_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL,
+                        UNIQUE (type, value)
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS intel_edges (
+                        id TEXT PRIMARY KEY, source_entity_id TEXT NOT NULL, target_entity_id TEXT NOT NULL,
+                        relationship TEXT NOT NULL, evidence_item_id TEXT, weight DOUBLE PRECISION NOT NULL DEFAULT 1,
+                        created_at TIMESTAMPTZ NOT NULL
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS intel_clusters (
+                        id TEXT PRIMARY KEY, title TEXT NOT NULL, summary TEXT NOT NULL, item_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        source_domains JSONB NOT NULL DEFAULT '[]'::jsonb, risk_level TEXT NOT NULL, confidence_score INTEGER NOT NULL,
+                        first_seen_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL, key_entities JSONB NOT NULL DEFAULT '[]'::jsonb,
+                        corroboration_level TEXT NOT NULL, evidence_count INTEGER NOT NULL
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS review_queue_items (
+                        id TEXT PRIMARY KEY, item_id TEXT NOT NULL, cluster_id TEXT, org_id TEXT, priority TEXT NOT NULL,
+                        reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
                     );
                 """)
             conn.commit()
@@ -880,6 +928,11 @@ async def reset_memory_state() -> None:
         _PILOT_LEADS.clear()
         _FEEDBACK.clear()
         _AUDIT_EVENTS.clear()
+        _CVE_ENRICHMENTS.clear()
+        _GRAPH_ENTITIES.clear()
+        _GRAPH_EDGES.clear()
+        _CLUSTERS.clear()
+        _REVIEW_QUEUE.clear()
         _PUBLIC_METRICS.landing_page_views = 0
         _PUBLIC_METRICS.demo_page_views = 0
         _PUBLIC_METRICS.pilot_form_submissions = 0
@@ -1143,3 +1196,200 @@ async def list_admin_audit_events(limit: int = 100, *, org_id: str | None = None
             if (org_id is None or event.org_id == org_id) and (action is None or event.action == action)
         ]
         return list(rows[:limit])
+
+
+def _cve_from_row(row: tuple[Any, ...]) -> CveEnrichment:
+    return CveEnrichment(cve_id=row[0], severity=row[1], cvss_score=row[2], epss_score=row[3], cisa_kev=bool(row[4]), affected_products=_as_list(row[5]), vendor_advisory_links=_as_list(row[6]), exploit_status=row[7], patch_status=row[8], enriched_at=_dt(row[9]) or "", sources=_as_list(row[10]))
+
+
+async def get_cve_enrichment(cve_id: str) -> CveEnrichment | None:
+    key = cve_id.upper()
+    if database_enabled():
+        def run() -> CveEnrichment | None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources FROM cve_enrichments WHERE cve_id = %s;", (key,))
+                    row = cur.fetchone()
+                    return _cve_from_row(row) if row else None
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return _CVE_ENRICHMENTS.get(key)
+
+
+async def save_cve_enrichment(enrichment: CveEnrichment) -> CveEnrichment:
+    enrichment.cve_id = enrichment.cve_id.upper()
+    async with _LOCK:
+        _CVE_ENRICHMENTS[enrichment.cve_id] = enrichment
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""INSERT INTO cve_enrichments (cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources)
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s::jsonb)
+                        ON CONFLICT (cve_id) DO UPDATE SET severity=EXCLUDED.severity, cvss_score=EXCLUDED.cvss_score, epss_score=EXCLUDED.epss_score, cisa_kev=EXCLUDED.cisa_kev, affected_products=EXCLUDED.affected_products, vendor_advisory_links=EXCLUDED.vendor_advisory_links, exploit_status=EXCLUDED.exploit_status, patch_status=EXCLUDED.patch_status, enriched_at=EXCLUDED.enriched_at, sources=EXCLUDED.sources;""", (enrichment.cve_id, enrichment.severity, enrichment.cvss_score, enrichment.epss_score, enrichment.cisa_kev, _json(enrichment.affected_products), _json(enrichment.vendor_advisory_links), enrichment.exploit_status, enrichment.patch_status, enrichment.enriched_at, _json(enrichment.sources)))
+                conn.commit()
+        await asyncio.to_thread(run)
+    return enrichment
+
+
+async def list_cve_enrichments(limit: int = 100) -> list[CveEnrichment]:
+    if database_enabled():
+        def run() -> list[CveEnrichment]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources FROM cve_enrichments ORDER BY enriched_at DESC LIMIT %s;", (limit,))
+                    return [_cve_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return sorted(_CVE_ENRICHMENTS.values(), key=lambda e: e.enriched_at, reverse=True)[:limit]
+
+
+def _entity_from_row(row: tuple[Any, ...]) -> IntelEntity:
+    return IntelEntity(id=row[0], type=row[1], value=row[2], display_name=row[3], first_seen_at=_dt(row[4]) or "", last_seen_at=_dt(row[5]) or "")
+
+
+def _edge_from_row(row: tuple[Any, ...]) -> IntelEdge:
+    return IntelEdge(id=row[0], source_entity_id=row[1], target_entity_id=row[2], relationship=row[3], evidence_item_id=row[4], weight=float(row[5]), created_at=_dt(row[6]) or "")
+
+
+async def replace_intel_graph(entities: list[IntelEntity], edges: list[IntelEdge]) -> None:
+    async with _LOCK:
+        _GRAPH_ENTITIES.clear(); _GRAPH_ENTITIES.update({e.id: e for e in entities})
+        _GRAPH_EDGES.clear(); _GRAPH_EDGES.update({e.id: e for e in edges})
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM intel_edges;"); cur.execute("DELETE FROM intel_entities;")
+                    for e in entities:
+                        cur.execute("INSERT INTO intel_entities (id, type, value, display_name, first_seen_at, last_seen_at) VALUES (%s,%s,%s,%s,%s,%s);", (e.id, e.type, e.value, e.display_name, e.first_seen_at, e.last_seen_at))
+                    for edge in edges:
+                        cur.execute("INSERT INTO intel_edges (id, source_entity_id, target_entity_id, relationship, evidence_item_id, weight, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s);", (edge.id, edge.source_entity_id, edge.target_entity_id, edge.relationship, edge.evidence_item_id, edge.weight, edge.created_at))
+                conn.commit()
+        await asyncio.to_thread(run)
+
+
+async def list_intel_entities(limit: int = 500, entity_type: str | None = None) -> list[IntelEntity]:
+    if database_enabled():
+        def run() -> list[IntelEntity]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    if entity_type:
+                        cur.execute("SELECT id,type,value,display_name,first_seen_at,last_seen_at FROM intel_entities WHERE type=%s ORDER BY last_seen_at DESC LIMIT %s;", (entity_type, limit))
+                    else:
+                        cur.execute("SELECT id,type,value,display_name,first_seen_at,last_seen_at FROM intel_entities ORDER BY last_seen_at DESC LIMIT %s;", (limit,))
+                    return [_entity_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        vals = [e for e in _GRAPH_ENTITIES.values() if not entity_type or e.type == entity_type]
+        return sorted(vals, key=lambda e: e.last_seen_at, reverse=True)[:limit]
+
+
+async def get_intel_entity(entity_id: str) -> IntelEntity | None:
+    for entity in await list_intel_entities(limit=10000):
+        if entity.id == entity_id:
+            return entity
+    return None
+
+
+async def list_intel_edges(limit: int = 1000) -> list[IntelEdge]:
+    if database_enabled():
+        def run() -> list[IntelEdge]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id,source_entity_id,target_entity_id,relationship,evidence_item_id,weight,created_at FROM intel_edges ORDER BY created_at DESC LIMIT %s;", (limit,))
+                    return [_edge_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return sorted(_GRAPH_EDGES.values(), key=lambda e: e.created_at, reverse=True)[:limit]
+
+
+def _cluster_from_row(row: tuple[Any, ...]) -> IntelCluster:
+    return IntelCluster(id=row[0], title=row[1], summary=row[2], item_ids=_as_list(row[3]), source_domains=_as_list(row[4]), risk_level=row[5], confidence_score=row[6], first_seen_at=_dt(row[7]) or "", last_seen_at=_dt(row[8]) or "", key_entities=_as_list(row[9]), corroboration_level=row[10], evidence_count=row[11])
+
+
+async def replace_intel_clusters(clusters: list[IntelCluster]) -> None:
+    async with _LOCK:
+        _CLUSTERS.clear(); _CLUSTERS.update({c.id: c for c in clusters})
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM intel_clusters;")
+                    for c in clusters:
+                        cur.execute("INSERT INTO intel_clusters (id,title,summary,item_ids,source_domains,risk_level,confidence_score,first_seen_at,last_seen_at,key_entities,corroboration_level,evidence_count) VALUES (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s::jsonb,%s,%s);", (c.id, c.title, c.summary, _json(c.item_ids), _json(c.source_domains), c.risk_level, c.confidence_score, c.first_seen_at, c.last_seen_at, _json(c.key_entities), c.corroboration_level, c.evidence_count))
+                conn.commit()
+        await asyncio.to_thread(run)
+
+
+async def list_intel_clusters(limit: int = 100) -> list[IntelCluster]:
+    if database_enabled():
+        def run() -> list[IntelCluster]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id,title,summary,item_ids,source_domains,risk_level,confidence_score,first_seen_at,last_seen_at,key_entities,corroboration_level,evidence_count FROM intel_clusters ORDER BY confidence_score DESC, last_seen_at DESC LIMIT %s;", (limit,))
+                    return [_cluster_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return sorted(_CLUSTERS.values(), key=lambda c: (c.confidence_score, c.last_seen_at), reverse=True)[:limit]
+
+
+async def get_intel_cluster(cluster_id: str) -> IntelCluster | None:
+    for cluster in await list_intel_clusters(limit=10000):
+        if cluster.id == cluster_id:
+            return cluster
+    return None
+
+
+def _review_from_row(row: tuple[Any, ...]) -> ReviewQueueItem:
+    return ReviewQueueItem(id=row[0], item_id=row[1], cluster_id=row[2], org_id=row[3], priority=row[4], reason=row[5], status=row[6], created_at=_dt(row[7]) or "", updated_at=_dt(row[8]) or "")
+
+
+async def save_review_queue_item(item: ReviewQueueItem) -> ReviewQueueItem:
+    async with _LOCK:
+        _REVIEW_QUEUE[item.id] = item
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO review_queue_items (id,item_id,cluster_id,org_id,priority,reason,status,created_at,updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO UPDATE SET cluster_id=EXCLUDED.cluster_id, org_id=EXCLUDED.org_id, priority=EXCLUDED.priority, reason=EXCLUDED.reason, status=EXCLUDED.status, updated_at=EXCLUDED.updated_at;", (item.id, item.item_id, item.cluster_id, item.org_id, item.priority, item.reason, item.status, item.created_at, item.updated_at))
+                conn.commit()
+        await asyncio.to_thread(run)
+    return item
+
+
+async def list_review_queue(limit: int = 200, status: str | None = None) -> list[ReviewQueueItem]:
+    if database_enabled():
+        def run() -> list[ReviewQueueItem]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    if status:
+                        cur.execute("SELECT id,item_id,cluster_id,org_id,priority,reason,status,created_at,updated_at FROM review_queue_items WHERE status=%s ORDER BY created_at DESC LIMIT %s;", (status, limit))
+                    else:
+                        cur.execute("SELECT id,item_id,cluster_id,org_id,priority,reason,status,created_at,updated_at FROM review_queue_items ORDER BY created_at DESC LIMIT %s;", (limit,))
+                    return [_review_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        vals = [r for r in _REVIEW_QUEUE.values() if not status or r.status == status]
+        return sorted(vals, key=lambda r: r.created_at, reverse=True)[:limit]
+
+
+async def get_review_queue_item(review_id: str) -> ReviewQueueItem | None:
+    for item in await list_review_queue(limit=10000):
+        if item.id == review_id:
+            return item
+    return None
+
+
+async def update_review_queue_item(review_id: str, *, status: str | None = None, priority: str | None = None, reason: str | None = None, updated_at: str = "") -> ReviewQueueItem | None:
+    item = await get_review_queue_item(review_id)
+    if not item:
+        return None
+    if status is not None:
+        item.status = status
+    if priority is not None:
+        item.priority = priority
+    if reason is not None:
+        item.reason = reason
+    item.updated_at = updated_at or item.updated_at
+    return await save_review_queue_item(item)

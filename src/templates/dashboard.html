@@ -208,6 +208,29 @@
             </div>
             <div id="alerts" class="list"></div>
           </section>
+
+          <section class="panel">
+            <h2>Intelligence maturity</h2>
+            <div id="intelligenceMaturity" class="list">Loading intelligence maturity…</div>
+          </section>
+          <section class="panel">
+            <h2>Intelligence graph</h2>
+            <button id="rebuildGraph" type="button">Rebuild graph</button>
+            <div id="graphNotice" class="notice"></div>
+            <div id="intelligenceGraph" class="list section">Loading graph…</div>
+          </section>
+          <section class="panel">
+            <h2>Incident clusters</h2>
+            <button id="rebuildClusters" type="button">Rebuild clusters</button>
+            <div id="clusterNotice" class="notice"></div>
+            <div id="incidentClusters" class="list section">Loading clusters…</div>
+          </section>
+          <section class="panel">
+            <h2>Analyst review queue</h2>
+            <button id="generateReview" type="button">Generate review queue</button>
+            <div id="reviewNotice" class="notice"></div>
+            <div id="analystReviewQueue" class="list section">Loading review queue…</div>
+          </section>
           <section class="panel">
             <h2>Customer proof report</h2>
             <div id="customerProof" class="list">Loading customer proof report…</div>
@@ -258,7 +281,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const initialItemsCount = {{ items_count }};
-      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, customerProof: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [], pilotReadiness: {}, audit: [], wizardRematchCompleted: false };
+      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, customerProof: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [], pilotReadiness: {}, audit: [], cves: [], graphEntities: [], graphEdges: [], clusters: [], reviewQueue: [], maturity: {}, wizardRematchCompleted: false };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
       const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
@@ -360,6 +383,19 @@
           const summary = document.createElement("p"); summary.className = "summary"; summary.textContent = item.summary || "No summary available."; card.append(summary);
           const evidence = document.createElement("p"); evidence.className = "summary"; evidence.textContent = item.evidence_summary ? `Evidence: ${item.evidence_summary}` : "Evidence: Source link and extracted feed summary."; card.append(evidence);
           const evidenceUrl = safeHttpUrl((item.evidence_links || [])[0]); if (evidenceUrl) { const a = document.createElement("a"); a.href = evidenceUrl; a.target = "_blank"; a.rel = "noreferrer"; a.className = "chip"; a.textContent = "Evidence link"; card.append(a); }
+          if (item.cluster_title || item.cluster_id) meta.append(chip(`Cluster: ${item.cluster_title || item.cluster_id}`, "badge watch"));
+          if ((item.cve_enrichments || []).length) {
+            const cveBox = document.createElement("div"); cveBox.className = "section list";
+            (item.cve_enrichments || []).forEach(cve => {
+              const c = document.createElement("div"); c.className = "mini";
+              const h = document.createElement("strong"); h.textContent = cve.cve_id;
+              const m = document.createElement("div"); m.className = "factor-list";
+              m.append(chip(cve.severity || "Unknown", `pill severity-${cve.severity || "Low"}`), chip(`Exploit: ${cve.exploit_status}`), chip(`CISA KEV: ${cve.cisa_kev ? "yes" : "no"}`), chip(`Patch: ${cve.patch_status}`));
+              (cve.sources || []).slice(0, 2).forEach(src => m.append(chip(`Source: ${src}`)));
+              c.append(h, m); cveBox.append(c);
+            });
+            card.append(cveBox);
+          }
           const fl = document.createElement("div"); fl.className = "factor-list"; (item.risk_factors || []).slice(0, 8).forEach(f => fl.append(chip(f))); (item.confidence_factors || []).slice(0, 4).forEach(f => fl.append(chip(f))); card.append(fl);
           const feedback = document.createElement("div"); feedback.className = "form-grid section";
           const relevance = document.createElement("select"); [["useful","Useful"],["not_useful","Not useful"],["false_positive","False positive"]].forEach(([v,t]) => { const o = opt(v); o.textContent = t; relevance.append(o); });
@@ -455,7 +491,7 @@
       function renderSidebars() {
         $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
         $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
-        renderPilotReadiness(); renderWizard(); renderWatchlists(); renderAlerts(); renderCustomerProof(); renderValueReport(); renderSourceConfigs(); renderAudit();
+        renderPilotReadiness(); renderWizard(); renderWatchlists(); renderAlerts(); renderIntelligenceMaturity(); renderIntelligenceGraph(); renderIncidentClusters(); renderReviewQueue(); renderCustomerProof(); renderValueReport(); renderSourceConfigs(); renderAudit();
         if (state.panelErrors.onboarding) setNotice("watchlistNotice", state.panelErrors.onboarding);
         if (!state.panelErrors.sourceConfigs && !state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
         $("sources").replaceChildren(...(state.sources.length ? state.sources.slice(0, 8).map(src => {
@@ -480,6 +516,42 @@
         $("wizardProgress").replaceChildren(...steps.map(([label, done]) => chip(`${done ? "✓" : "•"} ${label}`)));
         const ready = state.watchlists.length > 0 && ((state.alerts.total_persisted || (state.alerts.persisted || []).length) > 0);
         setNotice("pilotReady", ready ? "Pilot is ready: at least one watchlist exists and alerts have been generated." : "Complete setup steps to reach Pilot is ready.", ready);
+      }
+
+
+      function renderIntelligenceMaturity() {
+        const m = state.maturity || {};
+        const levels = m.levels || {};
+        $("intelligenceMaturity").replaceChildren(chip(`Score ${m.score ?? 0}/100`), ...Object.entries(levels).map(([k,v]) => chip(`${k}: ${v}`)), ...((m.blocking_gaps || []).slice(0, 4).map(g => chip(`Gap: ${g}`, "chip err"))), ...((m.next_actions || []).slice(0, 3).map(a => chip(`Next: ${a}`))));
+      }
+
+      function renderIntelligenceGraph() {
+        const byType = state.graphEntities.reduce((acc, e) => { (acc[e.type] ||= []).push(e); return acc; }, {});
+        const top = ["cve", "country", "sector", "source"].flatMap(type => (byType[type] || []).slice(0, 5).map(e => chip(`${type}: ${e.display_name}`)));
+        const rels = (state.graphEdges || []).slice(0, 8).map(edge => chip(`${edge.relationship}: ${edge.source_entity_id.slice(0,6)} → ${edge.target_entity_id.slice(0,6)}`));
+        $("intelligenceGraph").replaceChildren(...(top.length ? top : [chip("No graph entities yet. Run rebuild graph.")]), ...rels);
+      }
+
+      function renderIncidentClusters() {
+        $("incidentClusters").replaceChildren(...((state.clusters || []).slice(0, 6).map(cluster => {
+          const el = document.createElement("div"); el.className = "mini";
+          const h = document.createElement("strong"); h.textContent = cluster.title;
+          const meta = document.createElement("div"); meta.className = "factor-list";
+          meta.append(chip(`${(cluster.item_ids || []).length} items`), chip(`${(cluster.source_domains || []).length} sources`), chip(cluster.corroboration_level), chip(cluster.risk_level, `pill severity-${cluster.risk_level}`));
+          (cluster.key_entities || []).slice(0, 5).forEach(e => meta.append(chip(e)));
+          el.append(h, meta); return el;
+        })) || [chip("No clusters yet. Run rebuild clusters.")]));
+      }
+
+      function renderReviewQueue() {
+        $("analystReviewQueue").replaceChildren(...((state.reviewQueue || []).slice(0, 8).map(review => {
+          const el = document.createElement("div"); el.className = "mini";
+          const h = document.createElement("strong"); h.textContent = `${review.priority}: ${review.reason}`;
+          const meta = document.createElement("div"); meta.className = "factor-list"; meta.append(chip(review.status), chip(review.item_id));
+          const actions = document.createElement("div"); actions.className = "form-grid section";
+          ["reviewed", "dismissed", "escalated"].forEach(status => { const b = document.createElement("button"); b.type = "button"; b.textContent = status; b.addEventListener("click", () => patchReview(review.id, status)); actions.append(b); });
+          el.append(h, meta, actions); return el;
+        })) || [chip("No review items yet. Generate review queue.")]));
       }
 
       function renderCustomerProof() {
@@ -618,7 +690,12 @@
           safeJsonFetch(customerProofUrl(), requestOptions, {}, "customerProof").then(data => { state.customerProof = data || {}; }),
           safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; }),
           safeJsonFetch("/api/pilot-readiness", requestOptions, {}, "pilotReadiness").then(data => { state.pilotReadiness = data || {}; }),
-          safeJsonFetch(`/api/audit?${orgQuery()}&limit=20`, requestOptions, [], "audit").then(data => { state.audit = Array.isArray(data) ? data : []; })
+          safeJsonFetch(`/api/audit?${orgQuery()}&limit=20`, requestOptions, [], "audit").then(data => { state.audit = Array.isArray(data) ? data : []; }),
+          safeJsonFetch("/api/intelligence-maturity", requestOptions, {}, "maturity").then(data => { state.maturity = data || {}; }),
+          safeJsonFetch("/api/graph/entities", requestOptions, [], "graphEntities").then(data => { state.graphEntities = Array.isArray(data) ? data : []; }),
+          safeJsonFetch("/api/graph/edges", requestOptions, [], "graphEdges").then(data => { state.graphEdges = Array.isArray(data) ? data : []; }),
+          safeJsonFetch("/api/clusters", requestOptions, [], "clusters").then(data => { state.clusters = Array.isArray(data) ? data : []; }),
+          safeJsonFetch("/api/review", requestOptions, [], "reviewQueue").then(data => { state.reviewQueue = Array.isArray(data) ? data : []; })
         ]);
         await Promise.allSettled((state.alerts.persisted || []).map(async alert => {
           const events = await safeJsonFetch(`/api/alerts/${alert.id}/events`, requestOptions, [], "alertEvents");
@@ -626,6 +703,10 @@
         }));
         hydrateFilters(); renderStats(); renderPublicDemo(); renderSidebars(); applyFilters(); renderStatus();
       }
+
+
+      async function postAction(url, noticeId, success) { const res = await fetch(url, { method: "POST", headers: adminHeaders() }); if (res.status === 401) { setNotice(noticeId, "Action blocked: invalid or missing API key."); return; } if (!res.ok) { setNotice(noticeId, "Action failed."); return; } setNotice(noticeId, success, true); await load(); }
+      async function patchReview(id, status) { const res = await fetch(`/api/review/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify({ status }) }); if (res.status === 401) setNotice("reviewNotice", "Review update blocked: invalid or missing API key."); await load(); }
 
       async function refreshNow() {
         const b = $("refresh"); b.disabled = true; b.textContent = "Refreshing…"; setNotice("authNotice", "");
@@ -884,6 +965,9 @@
       }
 
       $("refresh").addEventListener("click", refreshNow);
+      $("rebuildGraph").addEventListener("click", () => postAction("/api/graph/rebuild", "graphNotice", "Graph rebuilt."));
+      $("rebuildClusters").addEventListener("click", () => postAction("/api/clusters/rebuild", "clusterNotice", "Clusters rebuilt."));
+      $("generateReview").addEventListener("click", () => postAction("/api/review/generate", "reviewNotice", "Review queue generated."));
       $("createWatchlist").addEventListener("click", createWatchlist);
       $("templateSelect").addEventListener("change", applyTemplate);
       $("createSource").addEventListener("click", createSource);

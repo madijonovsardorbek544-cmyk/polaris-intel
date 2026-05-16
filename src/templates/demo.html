@@ -27,6 +27,7 @@ function renderItems(items) {
     if (safeUrl) { const a = document.createElement("a"); a.href = safeUrl; a.target = "_blank"; a.rel = "noreferrer"; a.textContent = item.title || "Untitled item"; title.append(a); }
     else { title.textContent = item.title || "Untitled item"; }
     const summary = document.createElement("p"); summary.textContent = item.summary || "No summary available.";
+    (item.cve_enrichments || []).forEach(cve => meta.append(pill(`${cve.cve_id}: ${cve.severity || "Unknown"} / ${cve.exploit_status}`)));
     article.append(meta, title, summary, textBlock("Why it matters", item.why_it_matters), textBlock("Suggested action", item.recommended_action));
     if (item.evidence_summary) article.append(textBlock("Evidence", item.evidence_summary));
     const evidenceUrl = safeHttpUrl((item.evidence_links || [])[0]);
