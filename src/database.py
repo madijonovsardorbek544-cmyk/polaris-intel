@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
-from .models import Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, PublicMetrics, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
+from .models import AdminAuditEvent, Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, PublicMetrics, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
 
 _ITEMS: list[IntelligenceItem] = []
 _WATCHLISTS: list[Watchlist] = []
@@ -19,6 +19,7 @@ _ORG_PROFILES: dict[str, OrgScoringProfile] = {}
 _PILOT_LEADS: list[PilotLead] = []
 _PUBLIC_METRICS = PublicMetrics()
 _FEEDBACK: list[ItemFeedback] = []
+_AUDIT_EVENTS: list[AdminAuditEvent] = []
 _LOCK = asyncio.Lock()
 
 
@@ -287,6 +288,17 @@ async def init_db() -> None:
                         severity_feedback TEXT NOT NULL,
                         org_id TEXT NOT NULL,
                         comment TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS admin_audit_events (
+                        id TEXT PRIMARY KEY,
+                        action TEXT NOT NULL,
+                        resource_type TEXT NOT NULL,
+                        resource_id TEXT NOT NULL,
+                        org_id TEXT,
+                        message TEXT NOT NULL DEFAULT '',
                         created_at TIMESTAMPTZ NOT NULL
                     );
                 """)
@@ -867,10 +879,15 @@ async def reset_memory_state() -> None:
         _ORG_PROFILES.clear()
         _PILOT_LEADS.clear()
         _FEEDBACK.clear()
+        _AUDIT_EVENTS.clear()
         _PUBLIC_METRICS.landing_page_views = 0
         _PUBLIC_METRICS.demo_page_views = 0
         _PUBLIC_METRICS.pilot_form_submissions = 0
-
+    try:
+        from .routes.intelligence import clear_lead_rate_limits
+        clear_lead_rate_limits()
+    except Exception:
+        pass
 
 
 def _lead_from_row(row: tuple[Any, ...]) -> PilotLead:
@@ -1066,5 +1083,63 @@ async def list_item_feedback(
             if (org_id is None or feedback.org_id == org_id)
             and (item_id is None or feedback.item_id == item_id)
             and (relevance is None or feedback.relevance == relevance)
+        ]
+        return list(rows[:limit])
+
+
+def _audit_from_row(row: tuple[Any, ...]) -> AdminAuditEvent:
+    return AdminAuditEvent(
+        id=row[0],
+        action=row[1],
+        resource_type=row[2],
+        resource_id=row[3],
+        org_id=row[4],
+        message=row[5] or "",
+        created_at=_dt(row[6]) or "",
+    )
+
+
+async def add_admin_audit_event(event: AdminAuditEvent) -> AdminAuditEvent:
+    async with _LOCK:
+        _AUDIT_EVENTS.insert(0, event)
+        del _AUDIT_EVENTS[1000:]
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO admin_audit_events (id, action, resource_type, resource_id, org_id, message, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                        """,
+                        (event.id, event.action, event.resource_type, event.resource_id, event.org_id, event.message, event.created_at),
+                    )
+                conn.commit()
+        await asyncio.to_thread(run)
+    return event
+
+
+async def list_admin_audit_events(limit: int = 100, *, org_id: str | None = None, action: str | None = None) -> list[AdminAuditEvent]:
+    if database_enabled():
+        def run() -> list[AdminAuditEvent]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id, action, resource_type, resource_id, org_id, message, created_at
+                        FROM admin_audit_events
+                        WHERE (%s IS NULL OR org_id = %s)
+                          AND (%s IS NULL OR action = %s)
+                        ORDER BY created_at DESC
+                        LIMIT %s;
+                        """,
+                        (org_id, org_id, action, action, limit),
+                    )
+                    return [_audit_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        rows = [
+            event for event in _AUDIT_EVENTS
+            if (org_id is None or event.org_id == org_id) and (action is None or event.action == action)
         ]
         return list(rows[:limit])

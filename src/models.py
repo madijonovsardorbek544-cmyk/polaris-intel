@@ -148,3 +148,14 @@ class ItemFeedback:
     org_id: str
     comment: str = ""
     created_at: str = ""
+
+
+@dataclass
+class AdminAuditEvent:
+    id: str
+    action: str
+    resource_type: str
+    resource_id: str
+    org_id: str | None = None
+    message: str = ""
+    created_at: str = ""

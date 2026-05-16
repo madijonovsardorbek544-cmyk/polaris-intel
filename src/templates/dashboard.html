@@ -33,10 +33,10 @@
       .card { padding:18px; }
       .meta { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0; }
       .pill, .chip, .badge { display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:999px; padding:5px 9px; font-size:12px; color:var(--muted); background:rgba(255,255,255,.055); }
-      .risk-Critical { color:white; background:rgba(255,95,109,.22); border-color:rgba(255,95,109,.45); }
-      .risk-High { color:white; background:rgba(255,159,104,.20); border-color:rgba(255,159,104,.45); }
-      .risk-Medium { color:white; background:rgba(255,209,102,.16); border-color:rgba(255,209,102,.40); }
-      .risk-Low { color:white; background:rgba(142,202,230,.16); border-color:rgba(142,202,230,.35); }
+      .severity-Critical { color:white; background:rgba(255,95,109,.22); border-color:rgba(255,95,109,.45); }
+      .severity-High { color:white; background:rgba(255,159,104,.20); border-color:rgba(255,159,104,.45); }
+      .severity-Medium { color:white; background:rgba(255,209,102,.16); border-color:rgba(255,209,102,.40); }
+      .severity-Low { color:white; background:rgba(142,202,230,.16); border-color:rgba(142,202,230,.35); }
       .status-open { color:#fff; border-color:rgba(255,159,104,.45); background:rgba(255,159,104,.16); }
       .status-acknowledged { color:#fff; border-color:rgba(138,180,255,.45); background:rgba(138,180,255,.16); }
       .status-resolved { color:#fff; border-color:rgba(122,229,130,.45); background:rgba(122,229,130,.14); }
@@ -111,7 +111,7 @@
             <button type="button" data-demo-template="bank">Bank/finance risk</button>
           </div>
         </div>
-        <p class="muted section">Read-only public demo. Operator actions require an API key.</p>
+        <p class="muted section">Read-only public demo. Operator actions require an API key.</p><p class="muted">Operator dashboard. Write actions require API key.</p>
       </section>
 
       <section class="stats">
@@ -138,6 +138,11 @@
             <label class="muted" for="activeOrg">Active org_id</label>
             <input id="activeOrg" value="{{ default_org }}" placeholder="Active org_id" />
             <p class="muted">Stored in sessionStorage. Dashboard reads use this org_id.</p>
+          </section>
+          <section class="panel">
+            <h2>Pilot readiness</h2>
+            <p class="muted">Deployment guardrail before using POLARIS with real customer data.</p>
+            <div id="pilotReadiness" class="list">Loading pilot readiness…</div>
           </section>
           <section class="panel">
             <h2>Diagnostics</h2>
@@ -183,6 +188,7 @@
               <input id="wlActors" placeholder="Threat actors, comma-separated" />
               <select id="templateSelect"><option value="">Create from template</option><option value="school">School</option><option value="NGO">NGO</option><option value="logistics">Logistics</option><option value="bank">Bank</option><option value="energy">Energy</option><option value="telecom">Telecom</option><option value="government">Government</option></select>
               <button id="createWatchlist">Create</button>
+              <button id="runRematch" type="button">Run rematch</button>
             </div>
             <div id="watchlistNotice" class="notice"></div>
             <div id="watchlists" class="list section"></div>
@@ -235,6 +241,13 @@
             <div id="pilotLeads" class="list">Add API key to load leads.</div>
           </section>
           <section class="panel">
+            <h2>Admin audit log</h2>
+            <p class="muted">Recent administrative actions. Requires API key when configured.</p>
+            <button id="reloadAudit" type="button">Load audit log</button>
+            <div id="auditNotice" class="notice"></div>
+            <div id="auditLog" class="list">Add API key to load audit events.</div>
+          </section>
+          <section class="panel">
             <h2>Source health</h2>
             <div id="sources" class="list"></div>
           </section>
@@ -245,7 +258,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const initialItemsCount = {{ items_count }};
-      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, customerProof: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [] };
+      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, customerProof: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [], pilotReadiness: {}, audit: [], wizardRematchCompleted: false };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
       const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
@@ -341,7 +354,7 @@
           else { title.textContent = item.title || "Untitled item"; }
           card.append(title);
           const meta = document.createElement("div"); meta.className = "meta";
-          meta.append(chip(item.risk_level, `pill risk-${item.risk_level}`), chip(`Risk ${item.risk_score}`), chip(`Confidence ${item.confidence_score}`), chip(item.category), chip(item.source_domain || "source"), chip(`Reliability: ${item.source_reliability || "Medium"}`), chip(`Type: ${item.source_type || "custom"}`));
+          meta.append(chip(item.risk_level, `pill severity-${item.risk_level}`), chip(`Risk ${item.risk_score}`), chip(`Confidence ${item.confidence_score}`), chip(item.category), chip(item.source_domain || "source"), chip(`Reliability: ${item.source_reliability || "Medium"}`), chip(`Type: ${item.source_type || "custom"}`));
           (item.watchlist_matches || []).slice(0, 3).forEach(m => meta.append(chip(`Watchlist: ${m.watchlist_name} · ${m.matched_value}`, "badge watch")));
           card.append(meta);
           const summary = document.createElement("p"); summary.className = "summary"; summary.textContent = item.summary || "No summary available."; card.append(summary);
@@ -442,7 +455,7 @@
       function renderSidebars() {
         $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
         $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
-        renderWizard(); renderWatchlists(); renderAlerts(); renderCustomerProof(); renderValueReport(); renderSourceConfigs();
+        renderPilotReadiness(); renderWizard(); renderWatchlists(); renderAlerts(); renderCustomerProof(); renderValueReport(); renderSourceConfigs(); renderAudit();
         if (state.panelErrors.onboarding) setNotice("watchlistNotice", state.panelErrors.onboarding);
         if (!state.panelErrors.sourceConfigs && !state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
         $("sources").replaceChildren(...(state.sources.length ? state.sources.slice(0, 8).map(src => {
@@ -455,10 +468,14 @@
       }
 
       function renderWizard() {
+        const ownerAssigned = (state.alerts.persisted || []).some(alert => alert.owner && alert.status && alert.status !== "open");
         const steps = [
-          ["1 Choose organization type", $("wizardOrgType").value], ["2 Choose main country/region", $("wizardRegion").value],
-          ["3 Choose sectors", $("wizardSectors").value], ["4 Add organization name and keywords", $("wizardOrgName").value || $("wizardKeywords").value],
-          ["5 Create watchlist", state.watchlists.length > 0], ["6 Generate alerts", (state.alerts.total_persisted || (state.alerts.persisted || []).length) > 0], ["7 View daily brief", !!state.brief.headline_summary]
+          ["1 API key present", !!sessionStorage.getItem("polarisAdminApiKey")],
+          ["2 Watchlist created", state.watchlists.length > 0],
+          ["3 Rematch completed", state.wizardRematchCompleted || (state.items || []).some(item => (item.watchlist_matches || []).length)],
+          ["4 Alerts generated", (state.alerts.total_persisted || (state.alerts.persisted || []).length) > 0],
+          ["5 Owner assigned", ownerAssigned],
+          ["6 Proof report ready", !!(state.customerProof && state.customerProof.proof_summary)]
         ];
         $("wizardProgress").replaceChildren(...steps.map(([label, done]) => chip(`${done ? "✓" : "•"} ${label}`)));
         const ready = state.watchlists.length > 0 && ((state.alerts.total_persisted || (state.alerts.persisted || []).length) > 0);
@@ -599,7 +616,9 @@
           safeJsonFetch("/api/onboarding/template", requestOptions, { templates: {} }, "onboarding").then(data => { state.templates = (data && data.templates) || {}; }),
           safeJsonFetch(valueReportUrl(), requestOptions, {}, "valueReport").then(data => { state.valueReport = data || {}; }),
           safeJsonFetch(customerProofUrl(), requestOptions, {}, "customerProof").then(data => { state.customerProof = data || {}; }),
-          safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; })
+          safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; }),
+          safeJsonFetch("/api/pilot-readiness", requestOptions, {}, "pilotReadiness").then(data => { state.pilotReadiness = data || {}; }),
+          safeJsonFetch(`/api/audit?${orgQuery()}&limit=20`, requestOptions, [], "audit").then(data => { state.audit = Array.isArray(data) ? data : []; })
         ]);
         await Promise.allSettled((state.alerts.persisted || []).map(async alert => {
           const events = await safeJsonFetch(`/api/alerts/${alert.id}/events`, requestOptions, [], "alertEvents");
@@ -639,7 +658,7 @@
           const res = await fetch("/api/watchlists", { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
           if (res.status === 401) { setNotice("watchlistNotice", "Write blocked: invalid or missing API key."); return; }
           if (!res.ok) throw new Error("Watchlist create failed");
-          ["wlName", "wlCountries", "wlSectors", "wlKeywords", "wlCves", "wlActors"].forEach(id => $(id).value = ""); setNotice("watchlistNotice", "Watchlist created.", true); await load();
+          ["wlName", "wlCountries", "wlSectors", "wlKeywords", "wlCves", "wlActors"].forEach(id => $(id).value = ""); setNotice("watchlistNotice", "Watchlist created. Run rematch to apply watchlists to existing items.", true); await load();
         } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist create failed"); }
       }
 
@@ -650,8 +669,23 @@
           const res = await fetch(`/api/watchlists/${id}`, { method: "PUT", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
           if (res.status === 401) { setNotice("watchlistNotice", "Watchlist update blocked: invalid or missing API key."); return; }
           if (!res.ok) throw new Error("Watchlist update failed");
-          setNotice("watchlistNotice", "Watchlist updated.", true); await load();
+          setNotice("watchlistNotice", "Watchlist updated. Run rematch to apply watchlists to existing items.", true); await load();
         } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist update failed"); }
+      }
+
+      async function runRematch() {
+        const b = $("runRematch"); b.disabled = true; setNotice("watchlistNotice", "");
+        try {
+          const res = await fetch(`/api/rematch?${orgQuery()}`, { method: "POST", headers: adminHeaders() });
+          if (res.status === 401) { setNotice("watchlistNotice", "Rematch blocked: invalid or missing API key."); return false; }
+          if (!res.ok) throw new Error("Rematch failed");
+          const payload = await res.json();
+          state.wizardRematchCompleted = true;
+          setNotice("watchlistNotice", `Rematch checked ${payload.items_checked || 0} items and matched ${payload.items_matched || 0}.`, true);
+          await load();
+          return true;
+        } catch (err) { setNotice("watchlistNotice", err.message || "Rematch failed"); return false; }
+        finally { b.disabled = false; }
       }
 
       async function generateAlerts() {
@@ -704,7 +738,7 @@
         try {
           const res = await fetch(`/api/watchlists/${id}`, { method: "DELETE", headers: adminHeaders() });
           if (res.status === 401) { setNotice("watchlistNotice", "Delete blocked: invalid or missing API key."); return; }
-          if (!res.ok) throw new Error("Watchlist delete failed"); setNotice("watchlistNotice", "Watchlist deleted.", true); await load();
+          if (!res.ok) throw new Error("Watchlist delete failed"); setNotice("watchlistNotice", "Watchlist deleted. Run rematch to apply watchlists to existing items.", true); await load();
         } catch (err) { setNotice("watchlistNotice", err.message || "Watchlist delete failed"); }
       }
 
@@ -717,6 +751,31 @@
       }
 
 
+
+      function renderPilotReadiness() {
+        const target = $("pilotReadiness");
+        const payload = state.pilotReadiness || {};
+        const checks = payload.checks || {};
+        const nodes = [];
+        if (checks.demo_memory_warning) nodes.push(chip("Demo-memory mode: do not use for real customer data.", "chip err"));
+        nodes.push(chip(payload.ready_for_real_pilot ? "Ready for real pilot" : "Not ready for real pilot", payload.ready_for_real_pilot ? "chip ok" : "chip err"));
+        (payload.blocking_issues || []).forEach(issue => nodes.push(chip(`Blocking: ${issue}`, "chip err")));
+        (payload.recommended_actions || []).slice(0, 5).forEach(action => nodes.push(chip(`Action: ${action}`)));
+        Object.entries(checks).forEach(([key, value]) => nodes.push(chip(`${value ? "✓" : "•"} ${key.replaceAll("_", " ")}`)));
+        target.replaceChildren(...(nodes.length ? nodes : [chip("Pilot readiness unavailable.")]));
+      }
+
+      function renderAudit() {
+        const wrap = $("auditLog");
+        if (!state.audit.length) { const empty = document.createElement("div"); empty.className = "mini muted"; empty.textContent = "No audit events yet."; wrap.replaceChildren(empty); return; }
+        wrap.replaceChildren(...state.audit.map(event => {
+          const div = document.createElement("div"); div.className = "mini";
+          const strong = document.createElement("strong"); strong.textContent = `${event.action || "action"} · ${event.resource_type || "resource"}`;
+          const meta = document.createElement("div"); meta.className = "muted"; meta.textContent = `${event.resource_id || ""} · ${event.org_id || "global"} · ${event.created_at || ""}`;
+          const message = document.createElement("p"); message.className = "summary"; message.textContent = event.message || "";
+          div.append(strong, meta, message); return div;
+        }));
+      }
 
       function renderPublicMetrics() {
         const m = state.publicMetrics || {};
@@ -747,6 +806,15 @@
         state.publicMetrics = await res.json();
         setNotice("publicMetricsNotice", "Metrics loaded.", true);
         renderPublicMetrics();
+      }
+
+      async function loadAudit() {
+        const res = await fetch(`/api/audit?${orgQuery()}&limit=50`, { headers: adminHeaders(), cache: "no-store" });
+        if (res.status === 401) { setNotice("auditNotice", "Audit access blocked: invalid or missing API key."); return; }
+        if (!res.ok) { setNotice("auditNotice", "Audit log failed to load."); return; }
+        state.audit = await res.json();
+        setNotice("auditNotice", "Audit log loaded.", true);
+        renderAudit();
       }
 
       async function loadLeads() {
@@ -781,6 +849,10 @@
         if (!sessionStorage.getItem("polarisAdminApiKey")) { setNotice("wizardNotice", "Create watchlist only runs when API key is provided."); return; }
         wizardPrefillWatchlist();
         await createWatchlist();
+        if (sessionStorage.getItem("polarisAdminApiKey")) {
+          const rematched = await runRematch();
+          if (rematched) await generateAlerts();
+        }
       }
 
       async function sendFeedback(itemId, payload) {
@@ -818,6 +890,7 @@
       $("exportAlerts").addEventListener("click", () => downloadCsv(exportUrl("/api/export/alerts.csv"), "alerts.csv"));
       $("exportValue").addEventListener("click", () => downloadCsv(state.viewMode === "org" ? `/api/export/value-report.csv?${orgQuery()}&days=7` : "/api/export/value-report.csv?days=7", "value-report.csv"));
       $("generateAlerts").addEventListener("click", generateAlerts);
+      $("runRematch").addEventListener("click", runRematch);
       $("wizardPrefill").addEventListener("click", wizardPrefillWatchlist);
       $("wizardCreate").addEventListener("click", wizardCreateWatchlist);
       $("wizardGenerate").addEventListener("click", generateAlerts);
@@ -825,6 +898,7 @@
       $("exportProofText").addEventListener("click", exportProofText);
       $("reloadPublicMetrics").addEventListener("click", loadPublicMetrics);
       $("reloadLeads").addEventListener("click", loadLeads);
+      $("reloadAudit").addEventListener("click", loadAudit);
       controls.forEach(control => control.addEventListener("input", applyFilters));
       alertControls.forEach(control => control.addEventListener("input", renderAlerts));
       $("globalMode").addEventListener("click", () => setViewMode("global"));
@@ -833,6 +907,7 @@
       load();
       loadPublicMetrics();
       loadLeads();
+      loadAudit();
     </script>
   </body>
 </html>

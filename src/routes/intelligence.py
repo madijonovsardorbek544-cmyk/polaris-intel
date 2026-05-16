@@ -5,23 +5,61 @@ import csv
 import io
 import logging
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from ..auth import require_api_key, require_read_api_key
 from ..config import settings
-from ..database import add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_alert_events, list_alerts, list_item_feedback, list_items, list_pilot_leads, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, update_alert, update_pilot_lead_status, update_source_config
-from ..models import Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
+from ..database import add_admin_audit_event, add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_admin_audit_events, list_alert_events, list_alerts, list_item_feedback, list_items, list_pilot_leads, list_source_configs, list_source_health, list_watchlists, put_org_profile, reset_memory_state, save_alerts_with_counts, save_items, update_alert, update_pilot_lead_status, update_source_config
+from ..models import AdminAuditEvent, Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
 from ..schemas import AlertUpdate, ItemFeedbackCreate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
-from ..services.analysis import now_iso
+from ..services.analysis import analyze_item, now_iso
 from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_status, refresh_store, seed_demo_items
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+
+_LEAD_RATE_WINDOW_SECONDS = 60 * 60
+_LEAD_IP_LIMIT = 5
+_LEAD_EMAIL_LIMIT = 2
+_LEAD_IP_SUBMISSIONS: dict[str, deque[float]] = defaultdict(deque)
+_LEAD_EMAIL_SUBMISSIONS: dict[str, deque[float]] = defaultdict(deque)
+
+
+def clear_lead_rate_limits() -> None:
+    _LEAD_IP_SUBMISSIONS.clear()
+    _LEAD_EMAIL_SUBMISSIONS.clear()
+
+
+def _prune_rate_bucket(bucket: deque[float], now: float) -> None:
+    cutoff = now - _LEAD_RATE_WINDOW_SECONDS
+    while bucket and bucket[0] <= cutoff:
+        bucket.popleft()
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client and request.client.host else "unknown"
+
+
+def _check_lead_rate_limit(request: Request, email: str) -> None:
+    loop = asyncio.get_running_loop()
+    now = loop.time()
+    ip_bucket = _LEAD_IP_SUBMISSIONS[_client_ip(request)]
+    email_bucket = _LEAD_EMAIL_SUBMISSIONS[email.strip().lower()]
+    _prune_rate_bucket(ip_bucket, now)
+    _prune_rate_bucket(email_bucket, now)
+    if len(ip_bucket) >= _LEAD_IP_LIMIT or len(email_bucket) >= _LEAD_EMAIL_LIMIT:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many pilot requests. Please try again later.")
+    ip_bucket.append(now)
+    email_bucket.append(now)
+
+
+async def _audit(action: str, resource_type: str, resource_id: str, *, org_id: str | None = None, message: str = "") -> None:
+    await add_admin_audit_event(AdminAuditEvent(id=str(uuid.uuid4()), action=action, resource_type=resource_type, resource_id=resource_id, org_id=org_id, message=message, created_at=now_iso()))
 
 
 def _item_matches_org(item: IntelligenceItem, org_id: str | None) -> bool:
@@ -53,7 +91,10 @@ async def _dashboard_check(name: str, operation) -> tuple[str, dict[str, object]
 
 
 @router.post("/leads", status_code=status.HTTP_201_CREATED)
-async def create_lead(payload: PilotLeadCreate) -> dict[str, object]:
+async def create_lead(payload: PilotLeadCreate, request: Request) -> dict[str, object]:
+    if payload.website.strip():
+        return {"ok": True, "message": "Pilot request received."}
+    _check_lead_rate_limit(request, payload.email)
     lead = PilotLead(
         id=str(uuid.uuid4()),
         name=payload.name.strip(),
@@ -82,6 +123,7 @@ async def patch_lead(lead_id: str, payload: PilotLeadUpdate) -> dict[str, object
     lead = await update_pilot_lead_status(lead_id, payload.status)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    await _audit("lead_status_update", "pilot_lead", lead.id, message=f"Lead status updated to {lead.status}")
     return asdict(lead)
 
 
@@ -131,6 +173,82 @@ async def dashboard_health(org_id: str = Query(default=settings.default_org)) ->
     check_map = {name: check for name, check, _ in checks}
     errors = [error for _, _, error in checks if error]
     return {"ok": not errors, "checks": check_map, "errors": errors}
+
+
+@router.get("/pilot-readiness")
+async def pilot_readiness() -> dict[str, object]:
+    source_health = await list_source_health()
+    source_configs = await list_source_configs()
+    items_available = bool(await list_items(1))
+    sources_available = bool(source_health or source_configs or settings.feeds)
+    checks = {
+        "database_enabled": database_enabled(),
+        "api_key_configured": bool(settings.api_key.strip()),
+        "read_protection_enabled": bool(settings.protect_reads),
+        "lead_endpoint_working": True,
+        "items_available": items_available,
+        "sources_available": sources_available,
+        "telegram_configured": bool(settings.telegram_bot_token and settings.telegram_chat_id),
+        "demo_memory_warning": not database_enabled(),
+    }
+    blocking_issues: list[str] = []
+    recommended_actions: list[str] = []
+    if not checks["database_enabled"]:
+        blocking_issues.append("DATABASE_URL is missing; memory mode can lose customer data.")
+        recommended_actions.append("Provision PostgreSQL and set DATABASE_URL before handling real pilot data.")
+    if not checks["api_key_configured"]:
+        blocking_issues.append("POLARIS_API_KEY is missing; admin write endpoints are not protected.")
+        recommended_actions.append("Set a strong POLARIS_API_KEY and keep it out of URLs and client-side code.")
+    if not checks["read_protection_enabled"]:
+        blocking_issues.append("POLARIS_PROTECT_READS is false; sensitive read endpoints may be public.")
+        recommended_actions.append("Set POLARIS_PROTECT_READS=true before sharing the deployment.")
+    if not checks["items_available"]:
+        blocking_issues.append("No intelligence items are available.")
+        recommended_actions.append("Run feed refresh or seed demo items, then verify item ingestion succeeds.")
+    if not checks["sources_available"]:
+        blocking_issues.append("No sources are configured or reporting health.")
+        recommended_actions.append("Configure at least one enabled RSS source and verify source health.")
+    if not checks["telegram_configured"]:
+        recommended_actions.append("Optional: configure Telegram credentials if pilot users expect chat alerts.")
+    return {
+        "ready_for_real_pilot": not blocking_issues,
+        "checks": checks,
+        "blocking_issues": blocking_issues,
+        "recommended_actions": recommended_actions,
+    }
+
+
+@router.post("/rematch", dependencies=[Depends(require_api_key)])
+async def rematch(org_id: str | None = None, limit: int = Query(default=200, ge=1, le=1000)) -> dict[str, object]:
+    all_items = await list_items(limit)
+    all_watchlists = await list_watchlists()
+    if org_id:
+        all_watchlists = [watchlist for watchlist in all_watchlists if watchlist.org_id == org_id]
+    profile_ids = {watchlist.org_id for watchlist in all_watchlists}
+    org_profiles = {profile_id: await get_org_profile(profile_id) for profile_id in profile_ids}
+    updated_items: list[IntelligenceItem] = []
+    matched_count = 0
+    for item in all_items[:limit]:
+        rematched = analyze_item(item.title, item.summary, item.source_url, all_watchlists, created_at=item.created_at, org_profiles=org_profiles)
+        rematched.id = item.id
+        rematched.ingested_at = item.ingested_at
+        rematched.confidence_score = item.confidence_score
+        rematched.confidence_factors = item.confidence_factors
+        rematched.evidence_links = item.evidence_links
+        rematched.evidence_summary = item.evidence_summary
+        rematched.source_reliability = item.source_reliability
+        rematched.source_type = item.source_type
+        updated_items.append(rematched)
+        if rematched.watchlist_matches:
+            matched_count += 1
+    await save_items(updated_items)
+    await _audit("rematch_run", "intelligence_item", org_id or "all", org_id=org_id, message=f"Rematched {len(updated_items)} items; {matched_count} matched.")
+    return {"ok": True, "items_checked": len(updated_items), "items_matched": matched_count, "org_id": org_id}
+
+
+@router.get("/audit", dependencies=[Depends(require_api_key)])
+async def audit_events(org_id: str | None = Query(default=None, min_length=1, max_length=80), action: str | None = Query(default=None, min_length=1, max_length=120), limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str, object]]:
+    return [asdict(event) for event in await list_admin_audit_events(limit, org_id=org_id, action=action)]
 
 
 @router.get("/latest", dependencies=[Depends(require_read_api_key)])
@@ -248,6 +366,7 @@ async def generate_persistent_alerts(org_id: str | None = None) -> dict[str, obj
         all_items = [item for item in all_items if _item_matches_org(item, org_id)]
     candidates = alerts_from_items(all_items)
     result = await save_alerts_with_counts(candidates)
+    await _audit("alert_generation", "alert", org_id or "all", org_id=org_id, message=f"Generated {result.created_count} alerts; {result.existing_count} already existed.")
     return {
         "ok": True,
         "created": result.created_count,
@@ -282,10 +401,14 @@ async def patch_alert(alert_id: str, payload: AlertUpdate) -> dict[str, object]:
         "resolution_summary": "resolution_updated",
         "severity_override": "severity_override_changed",
     }
+    changed_fields = []
     for field, event_type in event_map.items():
         new_value = getattr(payload, field)
         if new_value is not None and before_values.get(field) != new_value:
+            changed_fields.append(field)
             await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert_id, event_type=event_type, message=f"{field} updated", created_at=now_iso()))
+    if changed_fields:
+        await _audit("alert_patch", "alert", alert_id, org_id=alert.org_id, message=f"Updated alert fields: {', '.join(changed_fields)}")
     return alert_to_dict(alert)
 
 
@@ -466,7 +589,10 @@ async def create_item_feedback(item_id: str, payload: ItemFeedbackCreate) -> dic
         comment=payload.comment.strip(),
         created_at=now_iso(),
     )
+    if not await get_item(item_id):
+        raise HTTPException(status_code=404, detail="Intelligence item not found")
     saved = await add_item_feedback(feedback)
+    await _audit("feedback_creation", "item_feedback", saved.id, org_id=saved.org_id, message=f"Feedback created for item {item_id}.")
     return {"ok": True, "feedback_id": saved.id, "item_id": saved.item_id}
 
 
@@ -499,6 +625,7 @@ async def telegram_send(alert_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="Alert not found")
     if not settings.telegram_bot_token or not settings.telegram_chat_id:
         await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert_id, event_type="telegram_failed", message="Telegram credentials missing", created_at=now_iso()))
+        await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message="Telegram send attempted but credentials were missing.")
         raise HTTPException(status_code=400, detail="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured to send Telegram alerts.")
     import httpx
     try:
@@ -511,10 +638,12 @@ async def telegram_send(alert_id: str) -> dict[str, object]:
             response.raise_for_status()
         logger.info("Telegram alert sent alert_id=%s", alert_id)
         await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert_id, event_type="telegram_sent", message="Telegram alert sent", created_at=now_iso()))
+        await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message="Telegram alert sent.")
         return {"ok": True, "detail": "Telegram alert sent."}
     except Exception as exc:
         logger.warning("Telegram alert failed alert_id=%s error_type=%s message=%s", alert_id, type(exc).__name__, str(exc))
         await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert_id, event_type="telegram_failed", message=f"Telegram send failed: {type(exc).__name__}", created_at=now_iso()))
+        await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message=f"Telegram send failed: {type(exc).__name__}.")
         raise HTTPException(status_code=502, detail="Telegram send failed.") from exc
 
 
@@ -526,7 +655,9 @@ async def source_configs() -> list[dict[str, object]]:
 @router.post("/source-configs", dependencies=[Depends(require_api_key)], status_code=201)
 async def create_source_config(payload: SourceConfigCreate) -> dict[str, object]:
     source = SourceConfig(id=str(uuid.uuid4()), url=payload.url.strip(), label=payload.label.strip(), category=payload.category, enabled=payload.enabled, created_at=now_iso())
-    return asdict(await add_source_config(source))
+    saved = await add_source_config(source)
+    await _audit("source_config_create", "source_config", saved.id, message=f"Created source config {saved.label}.")
+    return asdict(saved)
 
 
 @router.patch("/source-configs/{source_id}", dependencies=[Depends(require_api_key)])
@@ -534,6 +665,7 @@ async def patch_source_config(source_id: str, payload: SourceConfigUpdate) -> di
     source = await update_source_config(source_id, url=payload.url.strip() if payload.url else None, label=payload.label.strip() if payload.label else None, category=payload.category, enabled=payload.enabled)
     if not source:
         raise HTTPException(status_code=404, detail="Source config not found")
+    await _audit("source_config_update", "source_config", source.id, message=f"Updated source config {source.label}.")
     return asdict(source)
 
 
@@ -541,6 +673,7 @@ async def patch_source_config(source_id: str, payload: SourceConfigUpdate) -> di
 async def remove_source_config(source_id: str) -> Response:
     if not await delete_source_config(source_id):
         raise HTTPException(status_code=404, detail="Source config not found")
+    await _audit("source_config_delete", "source_config", source_id, message="Deleted source config.")
     return Response(status_code=204)
 
 

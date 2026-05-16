@@ -6,12 +6,19 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ..auth import require_api_key, require_read_api_key
 from ..config import settings
-from ..database import add_watchlist, delete_watchlist, get_watchlist, list_watchlists, update_watchlist
-from ..models import Watchlist
+from ..database import add_admin_audit_event, add_watchlist, delete_watchlist, get_watchlist, list_watchlists, update_watchlist
+from ..models import AdminAuditEvent, Watchlist
 from ..schemas import WatchlistCreate, WatchlistOut
 from ..services.analysis import now_iso
 
 router = APIRouter(prefix="/api/watchlists")
+
+
+async def _audit(action: str, watchlist: Watchlist | None = None, *, watchlist_id: str | None = None) -> None:
+    resource_id = watchlist.id if watchlist else (watchlist_id or "unknown")
+    org_id = watchlist.org_id if watchlist else None
+    name = watchlist.name if watchlist else resource_id
+    await add_admin_audit_event(AdminAuditEvent(id=str(uuid.uuid4()), action=action, resource_type="watchlist", resource_id=resource_id, org_id=org_id, message=f"Watchlist {name} {action.replace('watchlist_', '')}.", created_at=now_iso()))
 
 
 def _clean(values: list[str]) -> list[str]:
@@ -36,7 +43,9 @@ def _from_payload(payload: WatchlistCreate, *, watchlist_id: str, created_at: st
 @router.post("", response_model=WatchlistOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_api_key)])
 async def create_watchlist(payload: WatchlistCreate) -> Watchlist:
     watchlist = _from_payload(payload, watchlist_id=str(uuid.uuid4()), created_at=now_iso())
-    return await add_watchlist(watchlist)
+    saved = await add_watchlist(watchlist)
+    await _audit("watchlist_create", saved)
+    return saved
 
 
 @router.get("", response_model=list[WatchlistOut], dependencies=[Depends(require_read_api_key)])
@@ -64,11 +73,14 @@ async def replace_watchlist(watchlist_id: str, payload: WatchlistCreate) -> Watc
     saved = await update_watchlist(watchlist_id, updated)
     if not saved:
         raise HTTPException(status_code=404, detail="Watchlist not found")
+    await _audit("watchlist_update", saved)
     return saved
 
 
 @router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_api_key)])
 async def remove_watchlist(watchlist_id: str) -> Response:
+    existing = await get_watchlist(watchlist_id)
     if not await delete_watchlist(watchlist_id):
         raise HTTPException(status_code=404, detail="Watchlist not found")
+    await _audit("watchlist_delete", existing, watchlist_id=watchlist_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

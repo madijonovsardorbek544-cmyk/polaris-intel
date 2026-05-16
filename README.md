@@ -512,3 +512,38 @@ Demo-memory mode is only for the public demo and local walkthroughs. Real pilots
 - `GET /api/leads`, `PATCH /api/leads/{lead_id}`, and `GET /api/public-metrics` require `X-Polaris-API-Key`.
 - `GET /api/reports/customer-proof?org_id=<org_id>&days=7` summarizes monitored items, alert outcomes, top risks/actions, source health, and customer-proof summary text.
 - `POST /api/feedback/item/{item_id}` and `GET /api/feedback` collect operator feedback without changing scoring yet.
+
+## Before offering POLARIS to real pilot users
+
+POLARIS can run in demo-memory mode for local evaluation, but real pilot users require persistent storage and protected operator access. Before sharing a customer-facing deployment, verify this checklist:
+
+- `DATABASE_URL` is set to a managed PostgreSQL database.
+- `POLARIS_API_KEY` is set to a strong secret and shared only with operators.
+- `POLARIS_PROTECT_READS=true` is enabled so sensitive read endpoints require the API key.
+- `GET /api/pilot-readiness` returns `ready_for_real_pilot=true`.
+- `POST /api/leads` has been tested from the public pilot request form.
+- The full pilot workflow has been tested: watchlist -> rematch -> alerts -> proof report.
+- A backup and restore plan exists for the PostgreSQL database before real customer data is entered.
+
+Recommended local verification:
+
+```bash
+pytest -q
+uvicorn src.main:app --reload
+```
+
+Then open `/dashboard`, add the API key in the Admin API key field, review the **Pilot readiness** panel, create or update a watchlist, click **Run rematch**, generate alerts, assign an owner, and confirm the customer proof report is populated.
+
+## Current limits compared to Recorded Future
+
+POLARIS is an early pilot-oriented intelligence workflow product, not a full Recorded Future replacement. Current known limits:
+
+- No dark web collection.
+- No CVE enrichment pipeline yet.
+- No entity graph or relationship exploration yet.
+- No real multi-tenant authentication or per-user authorization yet.
+- No billing, metering, or subscription management.
+- No analyst team producing finished intelligence.
+- No enterprise integrations such as SIEM, SOAR, SSO, ticketing, or case-management connectors.
+
+These limits should be disclosed honestly in pilot conversations. POLARIS is currently strongest as a lightweight RSS-backed risk monitoring, watchlist matching, alert workflow, and customer proof reporting system for first design partners.
