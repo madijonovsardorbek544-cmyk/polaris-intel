@@ -144,6 +144,7 @@ class PilotLeadCreate(BaseModel):
     organization_type: str = Field(..., min_length=1, max_length=120)
     problem_description: str = Field(..., min_length=1, max_length=4000)
     preferred_contact_method: str = Field(default="", max_length=200)
+    website: str = Field(default="", max_length=500)
 
     @field_validator("email")
     @classmethod
@@ -170,6 +171,16 @@ class PilotLeadOut(PilotLeadCreate):
     id: str
     created_at: str
     status: str = "new"
+
+
+class AdminAuditEventOut(BaseModel):
+    id: str
+    action: str
+    resource_type: str
+    resource_id: str
+    org_id: str | None = None
+    message: str = ""
+    created_at: str = ""
 
 
 class PublicMetricsOut(BaseModel):

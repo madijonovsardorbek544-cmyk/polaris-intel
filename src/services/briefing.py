@@ -15,8 +15,13 @@ def generate_alerts(items: list[IntelligenceItem]) -> list[dict[str, object]]:
     for item in items:
         if item.risk_level not in {"Critical", "High"} or not item.watchlist_matches:
             continue
+        by_watchlist = {}
         for match in item.watchlist_matches:
-            alert_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{item.id}|{match.watchlist_id}|{match.reason}").hex
+            by_watchlist.setdefault((match.watchlist_id, match.org_id), []).append(match)
+        for (watchlist_id, _org_id), matches in by_watchlist.items():
+            match = matches[0]
+            reasons = "; ".join(dict.fromkeys(candidate.reason for candidate in matches))
+            alert_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{item.id}|{watchlist_id}").hex
             created_at = item.ingested_at or now_iso()
             alerts.append(
                 {
@@ -27,7 +32,7 @@ def generate_alerts(items: list[IntelligenceItem]) -> list[dict[str, object]]:
                     "matched_watchlist_id": match.watchlist_id,
                     "matched_watchlist_name": match.watchlist_name,
                     "matched_watchlist": match.watchlist_name,
-                    "reason": match.reason,
+                    "reason": reasons,
                     "recommended_action": item.recommended_action,
                     "status": "open",
                     "created_at": created_at,
