@@ -56,6 +56,11 @@ class Settings:
     port: int = int(os.getenv("PORT", "8000"))
     database_url: str = os.getenv("DATABASE_URL", "").strip()
     api_key: str = os.getenv("POLARIS_API_KEY", "").strip()
+    admin_api_key: str = os.getenv("POLARIS_ADMIN_API_KEY", "").strip()
+    operator_api_key: str = os.getenv("POLARIS_OPERATOR_API_KEY", "").strip()
+    readonly_api_key: str = os.getenv("POLARIS_READONLY_API_KEY", "").strip()
+    nvd_api_key: str = os.getenv("NVD_API_KEY", "").strip()
+    allowed_orgs: list[str] = field(default_factory=lambda: _csv(os.getenv("POLARIS_ALLOWED_ORGS", "")))
     protect_reads: bool = _bool(os.getenv("POLARIS_PROTECT_READS", "false"))
     default_org: str = os.getenv("POLARIS_DEFAULT_ORG", "demo").strip() or "demo"
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()

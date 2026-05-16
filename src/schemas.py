@@ -26,6 +26,13 @@ class CveEnrichmentOut(BaseModel):
     patch_status: str = "unknown"
     enriched_at: str = ""
     sources: list[str] = Field(default_factory=list)
+    last_refresh_attempt_at: str = ""
+    refresh_status: str = "pending"
+    last_error: str | None = None
+    nvd_last_modified: str | None = None
+    cisa_kev_due_date: str | None = None
+    epss_percentile: float | None = None
+    description: str = ""
 
 
 class IntelligenceItemOut(BaseModel):
@@ -125,15 +132,25 @@ class AlertEventOut(BaseModel):
 class SourceConfigCreate(BaseModel):
     url: str = Field(..., min_length=1, max_length=1000)
     label: str = Field(..., min_length=1, max_length=200)
-    category: str = Field(default="custom", pattern="^(cyber|geopolitical|local|custom)$")
+    category: str = Field(default="custom", pattern="^(cyber|geopolitical|local|custom|official|cyber-news|world-news)$")
     enabled: bool = True
+    trust_tier: str = Field(default="Medium", pattern="^(Low|Medium|High)$")
+    source_type: str = Field(default="custom", pattern="^(official|cyber-news|world-news|local|custom)$")
+    country_focus: list[str] = Field(default_factory=list)
+    sector_focus: list[str] = Field(default_factory=list)
+    notes: str = Field(default="", max_length=2000)
 
 
 class SourceConfigUpdate(BaseModel):
     url: str | None = Field(default=None, min_length=1, max_length=1000)
     label: str | None = Field(default=None, min_length=1, max_length=200)
-    category: str | None = Field(default=None, pattern="^(cyber|geopolitical|local|custom)$")
+    category: str | None = Field(default=None, pattern="^(cyber|geopolitical|local|custom|official|cyber-news|world-news)$")
     enabled: bool | None = None
+    trust_tier: str | None = Field(default=None, pattern="^(Low|Medium|High)$")
+    source_type: str | None = Field(default=None, pattern="^(official|cyber-news|world-news|local|custom)$")
+    country_focus: list[str] | None = None
+    sector_focus: list[str] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class SourceConfigOut(SourceConfigCreate):
@@ -217,3 +234,7 @@ class ItemFeedbackOut(ItemFeedbackCreate):
     id: str
     item_id: str
     created_at: str
+
+
+class CveEnrichRequest(BaseModel):
+    cve_ids: list[str] = Field(default_factory=list)

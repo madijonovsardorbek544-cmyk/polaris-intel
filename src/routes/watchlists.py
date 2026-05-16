@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from ..auth import require_api_key, require_read_api_key
+from ..auth import require_operator_key, require_read_api_key
 from ..config import settings
 from ..database import add_admin_audit_event, add_watchlist, delete_watchlist, get_watchlist, list_watchlists, update_watchlist
 from ..models import AdminAuditEvent, Watchlist
@@ -25,11 +25,21 @@ def _clean(values: list[str]) -> list[str]:
     return [value.strip() for value in values if value.strip()]
 
 
+def _validate_org_id(org_id: str | None) -> str | None:
+    import os
+    if not org_id:
+        return org_id
+    allowed = [part.strip() for part in os.getenv("POLARIS_ALLOWED_ORGS", "").split(",") if part.strip()]
+    if allowed and org_id not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid org_id '{org_id}'. Allowed orgs: {', '.join(allowed)}")
+    return org_id
+
+
 def _from_payload(payload: WatchlistCreate, *, watchlist_id: str, created_at: str) -> Watchlist:
     return Watchlist(
         id=watchlist_id,
         name=payload.name.strip(),
-        org_id=payload.org_id.strip() or settings.default_org,
+        org_id=_validate_org_id(payload.org_id.strip() or settings.default_org) or settings.default_org,
         countries=_clean(payload.countries),
         sectors=_clean(payload.sectors),
         organizations=_clean(payload.organizations),
@@ -40,7 +50,7 @@ def _from_payload(payload: WatchlistCreate, *, watchlist_id: str, created_at: st
     )
 
 
-@router.post("", response_model=WatchlistOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_api_key)])
+@router.post("", response_model=WatchlistOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operator_key)])
 async def create_watchlist(payload: WatchlistCreate) -> Watchlist:
     watchlist = _from_payload(payload, watchlist_id=str(uuid.uuid4()), created_at=now_iso())
     saved = await add_watchlist(watchlist)
@@ -50,6 +60,7 @@ async def create_watchlist(payload: WatchlistCreate) -> Watchlist:
 
 @router.get("", response_model=list[WatchlistOut], dependencies=[Depends(require_read_api_key)])
 async def get_watchlists(org_id: str | None = None) -> list[Watchlist]:
+    _validate_org_id(org_id)
     watchlists = await list_watchlists()
     if org_id:
         watchlists = [watchlist for watchlist in watchlists if watchlist.org_id == org_id]
@@ -64,7 +75,7 @@ async def watchlist_detail(watchlist_id: str) -> Watchlist:
     return watchlist
 
 
-@router.put("/{watchlist_id}", response_model=WatchlistOut, dependencies=[Depends(require_api_key)])
+@router.put("/{watchlist_id}", response_model=WatchlistOut, dependencies=[Depends(require_operator_key)])
 async def replace_watchlist(watchlist_id: str, payload: WatchlistCreate) -> Watchlist:
     existing = await get_watchlist(watchlist_id)
     if not existing:
@@ -77,7 +88,7 @@ async def replace_watchlist(watchlist_id: str, payload: WatchlistCreate) -> Watc
     return saved
 
 
-@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_api_key)])
+@router.delete("/{watchlist_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_operator_key)])
 async def remove_watchlist(watchlist_id: str) -> Response:
     existing = await get_watchlist(watchlist_id)
     if not await delete_watchlist(watchlist_id):

@@ -149,8 +149,8 @@
             <div id="diagnostics" class="diagnostic-links"></div>
           </section>
           <section class="panel">
-            <h2>Admin API key</h2>
-            <input id="adminKey" type="password" autocomplete="off" placeholder="X-Polaris-API-Key for write actions" />
+            <h2>Admin or operator API key</h2>
+            <input id="adminKey" type="password" autocomplete="off" placeholder="Admin or operator API key" />
             <p class="muted">Stored only in sessionStorage for this browser tab. Leave empty only when demo writes are unprotected.</p>
             <div id="authNotice" class="notice"></div>
           </section>
@@ -188,7 +188,7 @@
               <input id="wlActors" placeholder="Threat actors, comma-separated" />
               <select id="templateSelect"><option value="">Create from template</option><option value="school">School</option><option value="NGO">NGO</option><option value="logistics">Logistics</option><option value="bank">Bank</option><option value="energy">Energy</option><option value="telecom">Telecom</option><option value="government">Government</option></select>
               <button id="createWatchlist">Create</button>
-              <button id="runRematch" type="button">Run rematch</button>
+              <button id="runRematch" type="button">Run rematch</button><select id="allowedOrgDropdown"><option value="{{ default_org }}">{{ default_org }}</option></select><span id="orgWarning" class="muted"></span>
             </div>
             <div id="watchlistNotice" class="notice"></div>
             <div id="watchlists" class="list section"></div>
@@ -211,7 +211,7 @@
 
           <section class="panel">
             <h2>Intelligence maturity</h2>
-            <div id="intelligenceMaturity" class="list">Loading intelligence maturity…</div>
+            <div id="intelligenceMaturity" class="list">Loading intelligence maturity…</div></section><section class="panel"><h2>Intelligence quality</h2><div id="intelligenceQuality" class="list">Loading intelligence quality…</div>
           </section>
           <section class="panel">
             <h2>Intelligence graph</h2>
@@ -233,9 +233,9 @@
           </section>
           <section class="panel">
             <h2>Customer proof report</h2>
-            <div id="customerProof" class="list">Loading customer proof report…</div>
+            <div id="customerProof" class="list">Loading customer proof report…</div><button id="openPrintableReport" type="button">Open printable report</button>
             <div class="form-grid section"><button id="copyProof" type="button">Copy summary text</button><button id="exportProofText" type="button">Export plain text</button></div>
-            <h2 class="section">Value report</h2>
+            <h2 class="section">Weekly brief</h2><div id="weeklyBrief" class="list">Loading weekly brief…</div><h2 class="section">Value report</h2>
             <div id="valueReport" class="list">Loading value report…</div>
             <div class="form-grid section"><button id="exportAlerts">Export alerts CSV</button><button id="exportValue">Export value report CSV</button></div>
           </section>
@@ -244,13 +244,13 @@
             <div class="form-grid">
               <input id="sourceUrl" placeholder="Source URL" />
               <input id="sourceLabel" placeholder="Source label" />
-              <select id="sourceCategory"><option value="cyber">Cyber</option><option value="geopolitical">Geopolitical</option><option value="local">Local</option><option value="custom" selected>Custom</option></select>
+              <select id="sourceCategory"><option value="official">Official</option><option value="cyber-news">Cyber news</option><option value="world-news">World news</option><option value="local">Local</option><option value="custom" selected>Custom</option></select><select id="sourceTrust"><option>High</option><option selected>Medium</option><option>Low</option></select><input id="sourceNotes" placeholder="Source notes" />
               <button id="createSource">Add source</button>
             </div>
             <div id="sourceConfigNotice" class="notice"></div>
             <div id="sourceConfigs" class="list section"></div>
           </section>
-          <section class="panel">
+          <section class="panel"><h2>Jobs</h2><div class="form-grid"><button data-job="feed_refresh">Refresh feeds</button><button data-job="cve_enrichment">Enrich CVEs</button><button data-job="graph_rebuild">Rebuild graph</button><button data-job="cluster_rebuild">Rebuild clusters</button><button data-job="review_generate">Generate review queue</button><button data-job="rematch">Rematch items</button></div><div id="jobNotice" class="notice"></div><div id="jobsPanel" class="list">Loading jobs…</div></section><section class="panel">
             <h2>Public product metrics</h2>
             <button id="reloadPublicMetrics" type="button">Load public metrics</button>
             <div id="publicMetricsNotice" class="notice"></div>
@@ -281,7 +281,7 @@
     <script>
       const $ = (id) => document.getElementById(id);
       const initialItemsCount = {{ items_count }};
-      const state = { items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, customerProof: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [], pilotReadiness: {}, audit: [], cves: [], graphEntities: [], graphEdges: [], clusters: [], reviewQueue: [], maturity: {}, wizardRematchCompleted: false };
+      const state = { jobs: [], quality: {}, weeklyBrief: {}, items: [], publicStats: { global_items: initialItemsCount, global_high_critical: 0, sources: 0, active_org: "{{ default_org }}", org_items: 0, org_watchlists: 0, org_alerts: 0, last_status: "{{ status }}" }, alerts: { persisted: [], generated_preview: [] }, sources: [], sourceConfigs: [], brief: {}, watchlists: [], templates: {}, valueReport: {}, customerProof: {}, activeOrg: "{{ default_org }}", viewMode: "global", panelErrors: {}, criticalStatus: {}, publicMetrics: {}, leads: [], pilotReadiness: {}, audit: [], cves: [], graphEntities: [], graphEdges: [], clusters: [], reviewQueue: [], maturity: {}, wizardRematchCompleted: false };
       const controls = ["q", "risk", "category", "country", "sector"].map($);
       const alertControls = ["alertStatus", "alertType", "alertSearch"].map($);
       const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
@@ -491,7 +491,7 @@
       function renderSidebars() {
         $("briefHeadline").textContent = state.brief.headline_summary || "No brief available yet.";
         $("briefActions").replaceChildren(...(state.brief.recommended_actions || []).slice(0, 4).map(a => chip(a)));
-        renderPilotReadiness(); renderWizard(); renderWatchlists(); renderAlerts(); renderIntelligenceMaturity(); renderIntelligenceGraph(); renderIncidentClusters(); renderReviewQueue(); renderCustomerProof(); renderValueReport(); renderSourceConfigs(); renderAudit();
+        renderPilotReadiness(); renderProductionV2(); renderWizard(); renderWatchlists(); renderAlerts(); renderIntelligenceMaturity(); renderIntelligenceGraph(); renderIncidentClusters(); renderReviewQueue(); renderCustomerProof(); renderValueReport(); renderSourceConfigs(); renderAudit();
         if (state.panelErrors.onboarding) setNotice("watchlistNotice", state.panelErrors.onboarding);
         if (!state.panelErrors.sourceConfigs && !state.sources.some(src => src.status === "healthy")) { setNotice("sourceConfigNotice", "No sources are healthy. Action: Add source or Refresh feeds."); }
         $("sources").replaceChildren(...(state.sources.length ? state.sources.slice(0, 8).map(src => {
@@ -689,6 +689,9 @@
           safeJsonFetch(valueReportUrl(), requestOptions, {}, "valueReport").then(data => { state.valueReport = data || {}; }),
           safeJsonFetch(customerProofUrl(), requestOptions, {}, "customerProof").then(data => { state.customerProof = data || {}; }),
           safeJsonFetch("/api/source-configs", requestOptions, [], "sourceConfigs").then(data => { state.sourceConfigs = Array.isArray(data) ? data : []; }),
+          safeJsonFetch("/api/jobs", requestOptions, [], "jobs").then(data => { state.jobs = Array.isArray(data) ? data : []; }),
+          safeJsonFetch(`/api/intelligence-quality${orgQuery()}`, requestOptions, {}, "quality").then(data => { state.quality = data || {}; }),
+          safeJsonFetch(`/api/brief/weekly${orgQuery()}&days=7`, requestOptions, {}, "weeklyBrief").then(data => { state.weeklyBrief = data || {}; }),
           safeJsonFetch("/api/pilot-readiness", requestOptions, {}, "pilotReadiness").then(data => { state.pilotReadiness = data || {}; }),
           safeJsonFetch(`/api/audit?${orgQuery()}&limit=20`, requestOptions, [], "audit").then(data => { state.audit = Array.isArray(data) ? data : []; }),
           safeJsonFetch("/api/intelligence-maturity", requestOptions, {}, "maturity").then(data => { state.maturity = data || {}; }),
@@ -784,7 +787,7 @@
 
       async function createSource() {
         setNotice("sourceConfigNotice", "");
-        const payload = { url: $("sourceUrl").value.trim(), label: $("sourceLabel").value.trim(), category: $("sourceCategory").value, enabled: true };
+        const payload = { url: $("sourceUrl").value.trim(), label: $("sourceLabel").value.trim(), category: $("sourceCategory").value, source_type: $("sourceCategory").value, trust_tier: $("sourceTrust").value, notes: $("sourceNotes").value.trim(), enabled: true };
         try { const res = await fetch("/api/source-configs", { method: "POST", headers: { "Content-Type": "application/json", ...adminHeaders() }, body: JSON.stringify(payload) });
           if (res.status === 401) { setNotice("sourceConfigNotice", "Source create blocked: invalid or missing API key."); return; }
           if (!res.ok) throw new Error("Source create failed"); setNotice("sourceConfigNotice", "Source added.", true); await load();
@@ -832,6 +835,12 @@
       }
 
 
+
+      function renderProductionV2() {
+        if ($("intelligenceQuality")) $("intelligenceQuality").replaceChildren(chip(`Score ${state.quality.quality_score ?? "—"}/100`), ...((state.quality.top_quality_gaps || []).map(g => chip(g))));
+        if ($("weeklyBrief")) $("weeklyBrief").replaceChildren(chip(state.weeklyBrief.executive_summary || "No weekly brief yet"));
+        if ($("jobsPanel")) $("jobsPanel").replaceChildren(...(state.jobs || []).slice(0,8).map(j => chip(`${j.job_type}: ${j.status}`)));
+      }
 
       function renderPilotReadiness() {
         const target = $("pilotReadiness");
@@ -900,7 +909,7 @@
 
       async function loadLeads() {
         const res = await fetch("/api/leads", { headers: adminHeaders(), cache: "no-store" });
-        if (res.status === 401) { setNotice("leadNotice", "Lead access blocked: invalid or missing API key."); return; }
+        if (res.status === 403) { setNotice("leadNotice", "Admin key required for leads."); return; } if (res.status === 401) { setNotice("leadNotice", "Lead access blocked: invalid or missing API key."); return; }
         if (!res.ok) { setNotice("leadNotice", "Pilot leads failed to load."); return; }
         state.leads = await res.json();
         setNotice("leadNotice", "Pilot leads loaded.", true);
