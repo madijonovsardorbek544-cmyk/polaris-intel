@@ -591,17 +591,16 @@ For Render redeploys, push the committed branch, confirm the Render service uses
 
 ## Production Intelligence v2
 
-POLARIS now includes a production-intelligence layer with optional external CVE enrichment, in-process background jobs, stricter API-key roles, organization boundary validation, intelligence quality scoring, printable customer reports, and weekly briefs.
+POLARIS now includes a production-intelligence layer with deterministic offline CVE enrichment by default, in-process background jobs, stricter API-key roles, organization boundary validation, intelligence quality scoring, printable customer reports, and weekly briefs.
 
-### External CVE enrichment
+### CVE enrichment
 
-- `POST /api/cves/enrich` performs deterministic bulk enrichment from currently ingested items for demo/test safety. Pass `{"cve_ids":["CVE-YYYY-NNNN"]}` to enrich specific CVEs from external sources.
-- `POST /api/cves/{cve_id}/refresh` forces external refresh for one CVE.
-- External integrations live in `src/services/enrichment.py` and use timeouts/error isolation for:
+- `POST /api/cves/enrich` performs deterministic offline enrichment from currently ingested items for demo/test safety and returns `items_scanned`, `cves_found`, and `cves_enriched`. Pass `{"cve_ids":["CVE-YYYY-NNNN"]}` only to filter that offline scan to specific CVEs already present in items.
+- Optional external integration scaffolding lives in `src/services/enrichment.py` and is isolated from the default offline enrichment workflow. It uses timeouts/error isolation for:
   - NVD CVE API (`NVD_API_KEY` optional; unauthenticated public access is attempted when no key is set).
   - CISA Known Exploited Vulnerabilities catalog.
   - FIRST EPSS API.
-- Enrichment failures are stored on the CVE record and do not fail the whole application.
+- External enrichment failures are stored on the CVE record and do not fail the whole application.
 - CVE freshness states are `pending`, `fresh`, `stale`, and `failed`; records older than 24 hours are considered stale.
 
 ### Background jobs

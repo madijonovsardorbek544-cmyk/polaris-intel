@@ -48,7 +48,11 @@ def test_cve_enrichment_endpoints_and_item_attachment() -> None:
     c = client()
     enriched = c.post("/api/cves/enrich")
     assert enriched.status_code == 200
-    assert enriched.json()["enriched"] == 1
+    payload = enriched.json()
+    assert payload["items_scanned"] == 3
+    assert payload["cves_found"] == 1
+    assert payload["cves_enriched"] == 1
+    assert payload["enriched"] == 1
 
     records = c.get("/api/cves").json()
     assert records[0]["cve_id"] == "CVE-2026-11111"
@@ -60,6 +64,21 @@ def test_cve_enrichment_endpoints_and_item_attachment() -> None:
     assert item["cve_enrichments"][0]["cve_id"] == "CVE-2026-11111"
     assert c.get("/api/cves/CVE-2026-11111").json()["severity"] in {"Critical", "High", "Medium", "Low"}
 
+
+
+def test_cve_enrichment_detects_in_the_wild_exploitation_phrase() -> None:
+    item = analyze_item(
+        "Vendor warns CVE-2026-22222 exploited in the wild",
+        "Exploit activity against USA energy systems has been observed in the wild.",
+        "https://vendor.example/advisory/cve-2026-22222",
+        [],
+    )
+    asyncio.run(save_items([item]))
+    c = client()
+    response = c.post("/api/cves/enrich")
+    assert response.status_code == 200
+    record = c.get("/api/cves/CVE-2026-22222").json()
+    assert record["exploit_status"] == "reported_exploitation"
 
 def test_graph_rebuild_creates_expected_entities_and_edges() -> None:
     _seed_cve_items()

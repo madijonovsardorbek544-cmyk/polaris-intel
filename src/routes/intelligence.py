@@ -492,22 +492,28 @@ async def cve_detail(cve_id: str) -> dict[str, object]:
     return asdict(record)
 
 
-@router.post("/cves/enrich", dependencies=[Depends(require_operator_key)])
+@router.post("/cves/enrich", dependencies=[Depends(require_api_key)])
 async def enrich_cves(payload: CveEnrichRequest | None = None) -> dict[str, object]:
-    from ..services.enrichment import enrich_cve
-    if payload and payload.cve_ids:
-        records = [await enrich_cve(cve_id) for cve_id in payload.cve_ids]
-        await _audit("cve_enrichment", "cve_enrichment", "all", message=f"Enriched {len(records)} requested CVEs from external sources/cache.")
-        return {"ok": True, "enriched": len(records), "cves": [record.cve_id for record in records], "records": [asdict(record) for record in records]}
-    # Backward-compatible bulk enrichment is deterministic and offline-safe for demo/tests;
-    # operators can force external refresh per CVE or pass cve_ids to this endpoint.
-    records = build_cve_enrichments(await list_items(settings.max_items))
+    all_items = await list_items(settings.max_items)
+    target_cves = {cve.upper().strip() for cve in (payload.cve_ids if payload and payload.cve_ids else []) if cve.strip()}
+    records = [record for record in build_cve_enrichments(all_items) if not target_cves or record.cve_id in target_cves]
     for record in records:
         record.refresh_status = "fresh"
         record.last_refresh_attempt_at = record.enriched_at
         await save_cve_enrichment(record)
-    await _audit("cve_enrichment", "cve_enrichment", "all", message=f"Enriched {len(records)} CVEs from current items.")
-    return {"ok": True, "enriched": len(records), "cves": [record.cve_id for record in records]}
+    cves_found = {cve.upper() for item in all_items for cve in item_cves(item)}
+    if target_cves:
+        cves_found = {cve for cve in cves_found if cve in target_cves}
+    await _audit("cve_enrichment", "cve_enrichment", "all", message=f"Enriched {len(records)} CVEs from current items without external API calls.")
+    return {
+        "ok": True,
+        "items_scanned": len(all_items),
+        "cves_found": len(cves_found),
+        "cves_enriched": len(records),
+        # Backward-compatible fields retained for existing clients/tests.
+        "enriched": len(records),
+        "cves": [record.cve_id for record in records],
+    }
 
 @router.post("/cves/{cve_id}/refresh", dependencies=[Depends(require_operator_key)])
 async def refresh_cve(cve_id: str) -> dict[str, object]:
