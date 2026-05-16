@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import settings
-from .models import AdminAuditEvent, Alert, AlertEvent, CveEnrichment, IntelCluster, IntelEdge, IntelEntity, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, PublicMetrics, ReviewQueueItem, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
+from .models import AdminAuditEvent, Alert, AlertEvent, BackgroundJob, CveEnrichment, IntelCluster, IntelEdge, IntelEntity, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, PublicMetrics, ReviewQueueItem, SourceConfig, SourceHealth, Watchlist, WatchlistMatch
 
 _ITEMS: list[IntelligenceItem] = []
 _WATCHLISTS: list[Watchlist] = []
@@ -25,6 +25,7 @@ _GRAPH_ENTITIES: dict[str, IntelEntity] = {}
 _GRAPH_EDGES: dict[str, IntelEdge] = {}
 _CLUSTERS: dict[str, IntelCluster] = {}
 _REVIEW_QUEUE: dict[str, ReviewQueueItem] = {}
+_BACKGROUND_JOBS: dict[str, BackgroundJob] = {}
 _LOCK = asyncio.Lock()
 
 
@@ -320,6 +321,30 @@ async def init_db() -> None:
                         patch_status TEXT NOT NULL DEFAULT 'unknown',
                         enriched_at TIMESTAMPTZ NOT NULL,
                         sources JSONB NOT NULL DEFAULT '[]'::jsonb
+                    );
+                """)
+                cur.execute("ALTER TABLE cve_enrichments ADD COLUMN IF NOT EXISTS last_refresh_attempt_at TIMESTAMPTZ;")
+                cur.execute("ALTER TABLE cve_enrichments ADD COLUMN IF NOT EXISTS refresh_status TEXT NOT NULL DEFAULT 'pending';")
+                cur.execute("ALTER TABLE cve_enrichments ADD COLUMN IF NOT EXISTS last_error TEXT;")
+                cur.execute("ALTER TABLE cve_enrichments ADD COLUMN IF NOT EXISTS nvd_last_modified TIMESTAMPTZ;")
+                cur.execute("ALTER TABLE cve_enrichments ADD COLUMN IF NOT EXISTS cisa_kev_due_date TEXT;")
+                cur.execute("ALTER TABLE cve_enrichments ADD COLUMN IF NOT EXISTS epss_percentile DOUBLE PRECISION;")
+                cur.execute("ALTER TABLE cve_enrichments ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';")
+                cur.execute("ALTER TABLE source_configs ADD COLUMN IF NOT EXISTS trust_tier TEXT NOT NULL DEFAULT 'Medium';")
+                cur.execute("ALTER TABLE source_configs ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'custom';")
+                cur.execute("ALTER TABLE source_configs ADD COLUMN IF NOT EXISTS country_focus JSONB NOT NULL DEFAULT '[]'::jsonb;")
+                cur.execute("ALTER TABLE source_configs ADD COLUMN IF NOT EXISTS sector_focus JSONB NOT NULL DEFAULT '[]'::jsonb;")
+                cur.execute("ALTER TABLE source_configs ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS background_jobs (
+                        id TEXT PRIMARY KEY,
+                        job_type TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'queued',
+                        created_at TIMESTAMPTZ NOT NULL,
+                        started_at TIMESTAMPTZ,
+                        finished_at TIMESTAMPTZ,
+                        result_summary TEXT NOT NULL DEFAULT '',
+                        error_message TEXT
                     );
                 """)
                 cur.execute("""
@@ -827,7 +852,7 @@ async def add_source_config(source: SourceConfig) -> SourceConfig:
         def run() -> None:
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("INSERT INTO source_configs (id, url, label, category, enabled, created_at) VALUES (%s, %s, %s, %s, %s, %s);", (source.id, source.url, source.label, source.category, source.enabled, source.created_at))
+                    cur.execute("INSERT INTO source_configs (id, url, label, category, enabled, created_at, trust_tier, source_type, country_focus, sector_focus, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s);", (source.id, source.url, source.label, source.category, source.enabled, source.created_at, source.trust_tier, source.source_type, _json(source.country_focus), _json(source.sector_focus), source.notes))
                 conn.commit()
         await asyncio.to_thread(run)
     return source
@@ -838,8 +863,8 @@ async def list_source_configs() -> list[SourceConfig]:
         def run() -> list[SourceConfig]:
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, url, label, category, enabled, created_at FROM source_configs ORDER BY created_at DESC;")
-                    return [SourceConfig(id=row[0], url=row[1], label=row[2], category=row[3], enabled=bool(row[4]), created_at=_dt(row[5]) or "") for row in cur.fetchall()]
+                    cur.execute("SELECT id, url, label, category, enabled, created_at, trust_tier, source_type, country_focus, sector_focus, notes FROM source_configs ORDER BY created_at DESC;")
+                    return [SourceConfig(id=row[0], url=row[1], label=row[2], category=row[3], enabled=bool(row[4]), created_at=_dt(row[5]) or "", trust_tier=row[6] or "Medium", source_type=row[7] or "custom", country_focus=_as_list(row[8]), sector_focus=_as_list(row[9]), notes=row[10] or "") for row in cur.fetchall()]
         rows = await asyncio.to_thread(run)
         async with _LOCK:
             _SOURCE_CONFIGS[:] = rows
@@ -862,10 +887,10 @@ async def update_source_config(source_id: str, **updates: object) -> SourceConfi
         def run() -> SourceConfig | None:
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("""UPDATE source_configs SET url = COALESCE(%s, url), label = COALESCE(%s, label), category = COALESCE(%s, category), enabled = COALESCE(%s, enabled) WHERE id = %s RETURNING id, url, label, category, enabled, created_at;""", (updates.get('url'), updates.get('label'), updates.get('category'), updates.get('enabled'), source_id))
+                    cur.execute("""UPDATE source_configs SET url = COALESCE(%s, url), label = COALESCE(%s, label), category = COALESCE(%s, category), enabled = COALESCE(%s, enabled), trust_tier = COALESCE(%s, trust_tier), source_type = COALESCE(%s, source_type), country_focus = COALESCE(%s::jsonb, country_focus), sector_focus = COALESCE(%s::jsonb, sector_focus), notes = COALESCE(%s, notes) WHERE id = %s RETURNING id, url, label, category, enabled, created_at, trust_tier, source_type, country_focus, sector_focus, notes;""", (updates.get('url'), updates.get('label'), updates.get('category'), updates.get('enabled'), updates.get('trust_tier'), updates.get('source_type'), _json(updates.get('country_focus')) if updates.get('country_focus') is not None else None, _json(updates.get('sector_focus')) if updates.get('sector_focus') is not None else None, updates.get('notes'), source_id))
                     row = cur.fetchone()
                 conn.commit()
-                return SourceConfig(id=row[0], url=row[1], label=row[2], category=row[3], enabled=bool(row[4]), created_at=_dt(row[5]) or "") if row else None
+                return SourceConfig(id=row[0], url=row[1], label=row[2], category=row[3], enabled=bool(row[4]), created_at=_dt(row[5]) or "", trust_tier=row[6] or "Medium", source_type=row[7] or "custom", country_focus=_as_list(row[8]), sector_focus=_as_list(row[9]), notes=row[10] or "") if row else None
         updated = await asyncio.to_thread(run) or updated
     return updated
 
@@ -933,6 +958,7 @@ async def reset_memory_state() -> None:
         _GRAPH_EDGES.clear()
         _CLUSTERS.clear()
         _REVIEW_QUEUE.clear()
+        _BACKGROUND_JOBS.clear()
         _PUBLIC_METRICS.landing_page_views = 0
         _PUBLIC_METRICS.demo_page_views = 0
         _PUBLIC_METRICS.pilot_form_submissions = 0
@@ -1199,7 +1225,7 @@ async def list_admin_audit_events(limit: int = 100, *, org_id: str | None = None
 
 
 def _cve_from_row(row: tuple[Any, ...]) -> CveEnrichment:
-    return CveEnrichment(cve_id=row[0], severity=row[1], cvss_score=row[2], epss_score=row[3], cisa_kev=bool(row[4]), affected_products=_as_list(row[5]), vendor_advisory_links=_as_list(row[6]), exploit_status=row[7], patch_status=row[8], enriched_at=_dt(row[9]) or "", sources=_as_list(row[10]))
+    return CveEnrichment(cve_id=row[0], severity=row[1], cvss_score=row[2], epss_score=row[3], cisa_kev=bool(row[4]), affected_products=_as_list(row[5]), vendor_advisory_links=_as_list(row[6]), exploit_status=row[7], patch_status=row[8], enriched_at=_dt(row[9]) or "", sources=_as_list(row[10]), last_refresh_attempt_at=_dt(row[11]) or "", refresh_status=row[12] or "pending", last_error=row[13], nvd_last_modified=_dt(row[14]), cisa_kev_due_date=row[15], epss_percentile=row[16], description=row[17] or "")
 
 
 async def get_cve_enrichment(cve_id: str) -> CveEnrichment | None:
@@ -1208,7 +1234,7 @@ async def get_cve_enrichment(cve_id: str) -> CveEnrichment | None:
         def run() -> CveEnrichment | None:
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources FROM cve_enrichments WHERE cve_id = %s;", (key,))
+                    cur.execute("SELECT cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources, last_refresh_attempt_at, refresh_status, last_error, nvd_last_modified, cisa_kev_due_date, epss_percentile, description FROM cve_enrichments WHERE cve_id = %s;", (key,))
                     row = cur.fetchone()
                     return _cve_from_row(row) if row else None
         return await asyncio.to_thread(run)
@@ -1224,9 +1250,9 @@ async def save_cve_enrichment(enrichment: CveEnrichment) -> CveEnrichment:
         def run() -> None:
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("""INSERT INTO cve_enrichments (cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources)
-                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s::jsonb)
-                        ON CONFLICT (cve_id) DO UPDATE SET severity=EXCLUDED.severity, cvss_score=EXCLUDED.cvss_score, epss_score=EXCLUDED.epss_score, cisa_kev=EXCLUDED.cisa_kev, affected_products=EXCLUDED.affected_products, vendor_advisory_links=EXCLUDED.vendor_advisory_links, exploit_status=EXCLUDED.exploit_status, patch_status=EXCLUDED.patch_status, enriched_at=EXCLUDED.enriched_at, sources=EXCLUDED.sources;""", (enrichment.cve_id, enrichment.severity, enrichment.cvss_score, enrichment.epss_score, enrichment.cisa_kev, _json(enrichment.affected_products), _json(enrichment.vendor_advisory_links), enrichment.exploit_status, enrichment.patch_status, enrichment.enriched_at, _json(enrichment.sources)))
+                    cur.execute("""INSERT INTO cve_enrichments (cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources, last_refresh_attempt_at, refresh_status, last_error, nvd_last_modified, cisa_kev_due_date, epss_percentile, description)
+                        VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (cve_id) DO UPDATE SET severity=EXCLUDED.severity, cvss_score=EXCLUDED.cvss_score, epss_score=EXCLUDED.epss_score, cisa_kev=EXCLUDED.cisa_kev, affected_products=EXCLUDED.affected_products, vendor_advisory_links=EXCLUDED.vendor_advisory_links, exploit_status=EXCLUDED.exploit_status, patch_status=EXCLUDED.patch_status, enriched_at=EXCLUDED.enriched_at, sources=EXCLUDED.sources, last_refresh_attempt_at=EXCLUDED.last_refresh_attempt_at, refresh_status=EXCLUDED.refresh_status, last_error=EXCLUDED.last_error, nvd_last_modified=EXCLUDED.nvd_last_modified, cisa_kev_due_date=EXCLUDED.cisa_kev_due_date, epss_percentile=EXCLUDED.epss_percentile, description=EXCLUDED.description;""", (enrichment.cve_id, enrichment.severity, enrichment.cvss_score, enrichment.epss_score, enrichment.cisa_kev, _json(enrichment.affected_products), _json(enrichment.vendor_advisory_links), enrichment.exploit_status, enrichment.patch_status, enrichment.enriched_at or None, _json(enrichment.sources), enrichment.last_refresh_attempt_at or None, enrichment.refresh_status, enrichment.last_error, enrichment.nvd_last_modified, enrichment.cisa_kev_due_date, enrichment.epss_percentile, enrichment.description))
                 conn.commit()
         await asyncio.to_thread(run)
     return enrichment
@@ -1237,7 +1263,7 @@ async def list_cve_enrichments(limit: int = 100) -> list[CveEnrichment]:
         def run() -> list[CveEnrichment]:
             with _psycopg().connect(settings.database_url) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources FROM cve_enrichments ORDER BY enriched_at DESC LIMIT %s;", (limit,))
+                    cur.execute("SELECT cve_id, severity, cvss_score, epss_score, cisa_kev, affected_products, vendor_advisory_links, exploit_status, patch_status, enriched_at, sources, last_refresh_attempt_at, refresh_status, last_error, nvd_last_modified, cisa_kev_due_date, epss_percentile, description FROM cve_enrichments ORDER BY enriched_at DESC LIMIT %s;", (limit,))
                     return [_cve_from_row(row) for row in cur.fetchall()]
         return await asyncio.to_thread(run)
     async with _LOCK:
@@ -1393,3 +1419,50 @@ async def update_review_queue_item(review_id: str, *, status: str | None = None,
         item.reason = reason
     item.updated_at = updated_at or item.updated_at
     return await save_review_queue_item(item)
+
+async def save_background_job(job: BackgroundJob) -> BackgroundJob:
+    async with _LOCK:
+        _BACKGROUND_JOBS[job.id] = job
+    if database_enabled():
+        def run() -> None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO background_jobs (id, job_type, status, created_at, started_at, finished_at, result_summary, error_message)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status, started_at=EXCLUDED.started_at,
+                        finished_at=EXCLUDED.finished_at, result_summary=EXCLUDED.result_summary, error_message=EXCLUDED.error_message;""",
+                        (job.id, job.job_type, job.status, job.created_at, job.started_at, job.finished_at, job.result_summary, job.error_message),
+                    )
+                conn.commit()
+        await asyncio.to_thread(run)
+    return job
+
+
+def _job_from_row(row: tuple[Any, ...]) -> BackgroundJob:
+    return BackgroundJob(id=row[0], job_type=row[1], status=row[2], created_at=_dt(row[3]) or "", started_at=_dt(row[4]), finished_at=_dt(row[5]), result_summary=row[6] or "", error_message=row[7])
+
+
+async def list_background_jobs(limit: int = 100) -> list[BackgroundJob]:
+    if database_enabled():
+        def run() -> list[BackgroundJob]:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id,job_type,status,created_at,started_at,finished_at,result_summary,error_message FROM background_jobs ORDER BY created_at DESC LIMIT %s;", (limit,))
+                    return [_job_from_row(row) for row in cur.fetchall()]
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return sorted(_BACKGROUND_JOBS.values(), key=lambda j: j.created_at, reverse=True)[:limit]
+
+
+async def get_background_job(job_id: str) -> BackgroundJob | None:
+    if database_enabled():
+        def run() -> BackgroundJob | None:
+            with _psycopg().connect(settings.database_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id,job_type,status,created_at,started_at,finished_at,result_summary,error_message FROM background_jobs WHERE id=%s;", (job_id,))
+                    row = cur.fetchone()
+                    return _job_from_row(row) if row else None
+        return await asyncio.to_thread(run)
+    async with _LOCK:
+        return _BACKGROUND_JOBS.get(job_id)

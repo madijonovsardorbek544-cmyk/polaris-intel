@@ -88,6 +88,11 @@ Create a local `.env` file if you want to override defaults:
 
 ```env
 POLARIS_API_KEY=
+POLARIS_ADMIN_API_KEY=
+POLARIS_OPERATOR_API_KEY=
+POLARIS_READONLY_API_KEY=
+POLARIS_ALLOWED_ORGS=
+NVD_API_KEY=
 POLARIS_PROTECT_READS=false
 POLARIS_DEFAULT_ORG=demo
 TELEGRAM_BOT_TOKEN=
@@ -101,7 +106,10 @@ FEEDS=
 LOG_LEVEL=INFO
 ```
 
-- `POLARIS_API_KEY`: optional API key. If empty, demo writes are allowed. If set, protected requests must include `X-Polaris-API-Key: <key>`.
+- `POLARIS_API_KEY`: optional legacy API key. If empty, demo writes are allowed. If set, it remains a backward-compatible admin fallback.
+- `POLARIS_ADMIN_API_KEY`, `POLARIS_OPERATOR_API_KEY`, `POLARIS_READONLY_API_KEY`: optional role-specific API keys for production pilots.
+- `POLARIS_ALLOWED_ORGS`: optional comma-separated allowed org IDs. When set, invalid `org_id` values are rejected with HTTP 400.
+- `NVD_API_KEY`: optional NVD API key for CVE enrichment; unauthenticated NVD access is attempted when omitted.
 - `POLARIS_PROTECT_READS`: default `false`. When `true` and `POLARIS_API_KEY` is set, read endpoints require `X-Polaris-API-Key` too.
 - `POLARIS_DEFAULT_ORG`: default single-org context for the dashboard and omitted watchlist `org_id` values. Defaults to `demo`.
 - `TELEGRAM_BOT_TOKEN`: enables Telegram sending when paired with `TELEGRAM_CHAT_ID`; preview formatting works without credentials.
@@ -580,3 +588,73 @@ curl http://localhost:8000/api/intelligence-maturity -H "X-Polaris-API-Key: <key
 ```
 
 For Render redeploys, push the committed branch, confirm the Render service uses the same start command (`uvicorn src.main:app --host 0.0.0.0 --port $PORT` or the existing `Procfile`), and verify environment variables: `POLARIS_API_KEY`, `POLARIS_PROTECT_READS=true`, `DATABASE_URL`, and `POLARIS_DEFAULT_ORG`.
+
+## Production Intelligence v2
+
+POLARIS now includes a production-intelligence layer with optional external CVE enrichment, in-process background jobs, stricter API-key roles, organization boundary validation, intelligence quality scoring, printable customer reports, and weekly briefs.
+
+### External CVE enrichment
+
+- `POST /api/cves/enrich` performs deterministic bulk enrichment from currently ingested items for demo/test safety. Pass `{"cve_ids":["CVE-YYYY-NNNN"]}` to enrich specific CVEs from external sources.
+- `POST /api/cves/{cve_id}/refresh` forces external refresh for one CVE.
+- External integrations live in `src/services/enrichment.py` and use timeouts/error isolation for:
+  - NVD CVE API (`NVD_API_KEY` optional; unauthenticated public access is attempted when no key is set).
+  - CISA Known Exploited Vulnerabilities catalog.
+  - FIRST EPSS API.
+- Enrichment failures are stored on the CVE record and do not fail the whole application.
+- CVE freshness states are `pending`, `fresh`, `stale`, and `failed`; records older than 24 hours are considered stale.
+
+### Background jobs
+
+Use `POST /api/jobs/{job_type}` with an admin or operator key to enqueue non-blocking in-process jobs. Current job types are:
+
+- `feed_refresh`
+- `cve_enrichment`
+- `graph_rebuild`
+- `cluster_rebuild`
+- `review_generate`
+- `rematch`
+
+Use `GET /api/jobs` and `GET /api/jobs/{job_id}` to inspect status. Jobs are intentionally simple and in-process; Celery/Redis is a future scale-out step.
+
+### API key roles
+
+Role-specific keys are supported without introducing full user auth:
+
+```env
+POLARIS_ADMIN_API_KEY=
+POLARIS_OPERATOR_API_KEY=
+POLARIS_READONLY_API_KEY=
+POLARIS_API_KEY=
+POLARIS_ALLOWED_ORGS=
+NVD_API_KEY=
+POLARIS_PROTECT_READS=false
+```
+
+`POLARIS_API_KEY` remains a backward-compatible admin fallback when role-specific keys are not configured. Admin can do everything. Operator can manage watchlists, alerts, feedback, jobs, rematch, source configs, and Telegram workflows, but cannot read leads or public metrics. Readonly is accepted only for protected read endpoints when `POLARIS_PROTECT_READS=true`.
+
+### Organization boundaries
+
+Set `POLARIS_ALLOWED_ORGS=demo,customer-a` to reject unsupported `org_id` values with HTTP 400 on write/filter endpoints. When unset, POLARIS keeps legacy flexible demo behavior.
+
+### Database migrations
+
+Startup `init_db()` still creates/updates tables for demo resilience, but real PostgreSQL deployments should run Alembic migrations before starting the app:
+
+```bash
+export DATABASE_URL='postgresql://postgres:postgres@localhost:5432/polaris'
+alembic upgrade head
+uvicorn src.main:app --reload
+```
+
+On Render, configure `DATABASE_URL`, API keys, and any feed/enrichment variables, then add `alembic upgrade head` as a pre-deploy or release command before the web service starts. Demo-memory mode does not require Alembic.
+
+### Customer reporting
+
+- `GET /api/reports/customer-proof.html?org_id=demo&days=7` returns clean printable HTML. Use the browser's **Print to PDF** action for PDF output.
+- `GET /api/brief/weekly?org_id=demo&days=7` returns a customer-facing weekly brief with top risks, CVEs, exploited CVEs, clusters, alerts, actions, source-health notes, and proof summary.
+- `GET /api/intelligence-quality` returns a 0-100 quality score plus gaps and next actions.
+
+### CI
+
+GitHub Actions CI is defined in `.github/workflows/ci.yml` and runs dependency installation, `pytest -q`, and `python -m compileall src` without requiring secrets.

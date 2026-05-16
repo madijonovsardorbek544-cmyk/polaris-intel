@@ -106,6 +106,11 @@ class SourceConfig:
     category: str = "custom"
     enabled: bool = True
     created_at: str = ""
+    trust_tier: str = "Medium"
+    source_type: str = "custom"
+    country_focus: list[str] = field(default_factory=list)
+    sector_focus: list[str] = field(default_factory=list)
+    notes: str = ""
 
 
 @dataclass
@@ -173,6 +178,13 @@ class CveEnrichment:
     patch_status: str = "unknown"
     enriched_at: str = ""
     sources: list[str] = field(default_factory=list)
+    last_refresh_attempt_at: str = ""
+    refresh_status: str = "pending"
+    last_error: str | None = None
+    nvd_last_modified: str | None = None
+    cisa_kev_due_date: str | None = None
+    epss_percentile: float | None = None
+    description: str = ""
 
 
 @dataclass
@@ -223,3 +235,15 @@ class ReviewQueueItem:
     status: str = "pending"
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass
+class BackgroundJob:
+    id: str
+    job_type: str
+    status: str = "queued"
+    created_at: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+    result_summary: str = ""
+    error_message: str | None = None

@@ -22,11 +22,29 @@ from ..database import (
 from ..feeds import parse_feed
 from ..models import IntelligenceItem
 from .analysis import analyze_item, now_iso
+from ..scoring import source_domain
 
 _LAST_REFRESH_STATUS = "cold"
 _LAST_REFRESH_TS = 0.0
 _LOCK = asyncio.Lock()
 logger = logging.getLogger(__name__)
+
+
+def apply_source_config_trust(item: IntelligenceItem, configs: list[object]) -> IntelligenceItem:
+    domain = source_domain(item.source_url)
+    for config in configs:
+        if not getattr(config, "enabled", True):
+            continue
+        config_domain = source_domain(getattr(config, "url", ""))
+        if config_domain and (domain == config_domain or domain.endswith(config_domain)):
+            trust = getattr(config, "trust_tier", "Medium") or "Medium"
+            item.source_reliability = trust
+            item.source_type = getattr(config, "source_type", item.source_type) or item.source_type
+            boost = {"High": 20, "Medium": 12, "Low": 4}.get(trust, 8)
+            item.confidence_score = min(100, max(0, item.confidence_score + boost - 12))
+            item.confidence_factors = [f for f in item.confidence_factors if "source" not in f.lower()] + [f"Configured source trust: {trust} +{boost}"]
+            break
+    return item
 
 
 @dataclass
@@ -63,7 +81,8 @@ async def fetch_feed_result(client: object, feed_url: str) -> FeedFetchResult:
     watchlists = await list_watchlists()
     org_ids = {watchlist.org_id for watchlist in watchlists}
     profiles = {org_id: await get_org_profile(org_id) for org_id in org_ids}
-    items = [analyze_item(entry["title"], entry["summary"], entry["source_url"], watchlists, entry["created_at"], profiles) for entry in entries]
+    configs = await list_source_configs()
+    items = [apply_source_config_trust(analyze_item(entry["title"], entry["summary"], entry["source_url"], watchlists, entry["created_at"], profiles), configs) for entry in entries]
     return FeedFetchResult(feed_url=feed_url, items=items, ok=True, error=None, empty=False)
 
 

@@ -8,19 +8,21 @@ import uuid
 from collections import Counter, defaultdict, deque
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 
-from ..auth import require_api_key, require_read_api_key
+from ..auth import require_admin_key, require_api_key, require_operator_key, require_read_api_key
 from ..config import settings
-from ..database import add_admin_audit_event, add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_cve_enrichment, get_intel_cluster, get_intel_entity, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_admin_audit_events, list_alert_events, list_alerts, list_cve_enrichments, list_intel_clusters, list_intel_edges, list_intel_entities, list_item_feedback, list_items, list_pilot_leads, list_review_queue, list_source_configs, list_source_health, list_watchlists, put_org_profile, replace_intel_clusters, replace_intel_graph, reset_memory_state, save_alerts_with_counts, save_cve_enrichment, save_items, save_review_queue_item, update_alert, update_pilot_lead_status, update_review_queue_item, update_source_config
-from ..models import AdminAuditEvent, Alert, AlertEvent, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
-from ..schemas import AlertUpdate, ItemFeedbackCreate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
+from ..database import add_admin_audit_event, add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_background_job, get_cve_enrichment, get_intel_cluster, get_intel_entity, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_admin_audit_events, list_alert_events, list_alerts, list_background_jobs, list_cve_enrichments, list_intel_clusters, list_intel_edges, list_intel_entities, list_item_feedback, list_items, list_pilot_leads, list_review_queue, list_source_configs, list_source_health, list_watchlists, put_org_profile, replace_intel_clusters, replace_intel_graph, reset_memory_state, save_alerts_with_counts, save_background_job, save_cve_enrichment, save_items, save_review_queue_item, update_alert, update_pilot_lead_status, update_review_queue_item, update_source_config
+from ..models import AdminAuditEvent, Alert, AlertEvent, BackgroundJob, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
+from ..schemas import AlertUpdate, CveEnrichRequest, ItemFeedbackCreate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
 from ..services.analysis import analyze_item, now_iso
 from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
 from ..services.ingestion import item_to_dict, refresh_status, refresh_store, seed_demo_items
 from ..services.intelligence_layers import apply_cluster_confidence, attach_enrichments, build_clusters, build_cve_enrichments, build_graph, generate_review_items, item_cves, maturity_score
 
 logger = logging.getLogger(__name__)
+
+JOB_TYPES = {"feed_refresh", "cve_enrichment", "graph_rebuild", "cluster_rebuild", "review_generate", "rematch"}
 
 router = APIRouter(prefix="/api")
 
@@ -77,6 +79,21 @@ def _alert_matches_org(alert: Alert | dict[str, object], org_id: str | None) -> 
     return alert.get("org_id") == org_id
 
 
+def _allowed_orgs() -> list[str]:
+    import os
+    raw = os.getenv("POLARIS_ALLOWED_ORGS", "").strip()
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
+def _validate_org_id(org_id: str | None) -> str | None:
+    if not org_id:
+        return org_id
+    allowed = _allowed_orgs()
+    if allowed and org_id not in allowed:
+        raise HTTPException(status_code=400, detail=f"Invalid org_id '{org_id}'. Allowed orgs: {', '.join(allowed)}")
+    return org_id
+
+
 async def _dashboard_check(name: str, operation) -> tuple[str, dict[str, object], str | None]:
     try:
         result = await operation()
@@ -127,12 +144,12 @@ async def create_lead(payload: PilotLeadCreate, request: Request) -> dict[str, o
     return {"ok": True, "lead_id": saved.id, "message": "Pilot request received."}
 
 
-@router.get("/leads", dependencies=[Depends(require_api_key)])
+@router.get("/leads", dependencies=[Depends(require_admin_key)])
 async def leads(status: str | None = Query(default=None, pattern="^(new|contacted|qualified|rejected)$"), limit: int = Query(default=50, ge=1, le=200)) -> list[dict[str, object]]:
     return [asdict(lead) for lead in await list_pilot_leads(limit, status=status)]
 
 
-@router.patch("/leads/{lead_id}", dependencies=[Depends(require_api_key)])
+@router.patch("/leads/{lead_id}", dependencies=[Depends(require_admin_key)])
 async def patch_lead(lead_id: str, payload: PilotLeadUpdate) -> dict[str, object]:
     lead = await update_pilot_lead_status(lead_id, payload.status)
     if not lead:
@@ -141,7 +158,7 @@ async def patch_lead(lead_id: str, payload: PilotLeadUpdate) -> dict[str, object
     return asdict(lead)
 
 
-@router.get("/public-metrics", dependencies=[Depends(require_api_key)])
+@router.get("/public-metrics", dependencies=[Depends(require_admin_key)])
 async def public_metrics() -> dict[str, int]:
     return asdict(await get_public_metrics())
 
@@ -232,8 +249,9 @@ async def pilot_readiness() -> dict[str, object]:
     }
 
 
-@router.post("/rematch", dependencies=[Depends(require_api_key)])
+@router.post("/rematch", dependencies=[Depends(require_operator_key)])
 async def rematch(org_id: str | None = None, limit: int = Query(default=200, ge=1, le=1000)) -> dict[str, object]:
+    _validate_org_id(org_id)
     all_items = await list_items(limit)
     all_watchlists = await list_watchlists()
     if org_id:
@@ -260,7 +278,7 @@ async def rematch(org_id: str | None = None, limit: int = Query(default=200, ge=
     return {"ok": True, "items_checked": len(updated_items), "items_matched": matched_count, "org_id": org_id}
 
 
-@router.get("/audit", dependencies=[Depends(require_api_key)])
+@router.get("/audit", dependencies=[Depends(require_read_api_key)])
 async def audit_events(org_id: str | None = Query(default=None, min_length=1, max_length=80), action: str | None = Query(default=None, min_length=1, max_length=120), limit: int = Query(default=100, ge=1, le=500)) -> list[dict[str, object]]:
     return [asdict(event) for event in await list_admin_audit_events(limit, org_id=org_id, action=action)]
 
@@ -318,6 +336,7 @@ async def seed() -> dict[str, object]:
 
 @router.get("/public-demo-stats", dependencies=[Depends(require_read_api_key)])
 async def public_demo_stats(org_id: str = Query(default=settings.default_org)) -> dict[str, object]:
+    _validate_org_id(org_id)
     all_items = await list_items(settings.max_items)
     source_health = await list_source_health()
     watchlists = [watchlist for watchlist in await list_watchlists() if watchlist.org_id == org_id]
@@ -343,6 +362,7 @@ async def sources() -> list[dict[str, object]]:
 
 @router.get("/alerts", dependencies=[Depends(require_read_api_key)])
 async def alerts(org_id: str | None = None) -> dict[str, object]:
+    _validate_org_id(org_id)
     persisted = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     generated_preview = [alert for alert in generate_alerts(await list_items(settings.max_items)) if _alert_matches_org(alert, org_id)]
     return {
@@ -355,6 +375,7 @@ async def alerts(org_id: str | None = None) -> dict[str, object]:
 
 @router.get("/alerts/flat", dependencies=[Depends(require_read_api_key)])
 async def alerts_flat(org_id: str | None = None) -> list[dict[str, object]]:
+    _validate_org_id(org_id)
     persisted = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     if persisted:
         return [alert_to_dict(alert) for alert in persisted]
@@ -373,8 +394,9 @@ async def alert_detail(alert_id: str) -> dict[str, object]:
     return alert_to_dict(alert)
 
 
-@router.post("/alerts/generate", dependencies=[Depends(require_api_key)])
+@router.post("/alerts/generate", dependencies=[Depends(require_operator_key)])
 async def generate_persistent_alerts(org_id: str | None = None) -> dict[str, object]:
+    _validate_org_id(org_id)
     all_items = await list_items(settings.max_items)
     if org_id:
         all_items = [item for item in all_items if _item_matches_org(item, org_id)]
@@ -390,7 +412,7 @@ async def generate_persistent_alerts(org_id: str | None = None) -> dict[str, obj
     }
 
 
-@router.patch("/alerts/{alert_id}", dependencies=[Depends(require_api_key)])
+@router.patch("/alerts/{alert_id}", dependencies=[Depends(require_operator_key)])
 async def patch_alert(alert_id: str, payload: AlertUpdate) -> dict[str, object]:
     before = await get_alert(alert_id)
     if not before:
@@ -441,7 +463,7 @@ async def telegram_preview(alert_id: str) -> dict[str, object]:
     return {"message": format_alert_for_telegram(alert)}
 
 
-@router.post("/demo/reset", dependencies=[Depends(require_api_key)])
+@router.post("/demo/reset", dependencies=[Depends(require_admin_key)])
 async def demo_reset() -> dict[str, object]:
     if database_enabled():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Demo reset is disabled in database mode.")
@@ -451,6 +473,7 @@ async def demo_reset() -> dict[str, object]:
 
 @router.get("/brief/daily", dependencies=[Depends(require_read_api_key)])
 async def daily_brief(org_id: str | None = None) -> dict[str, object]:
+    _validate_org_id(org_id)
     all_items = await list_items(settings.max_items)
     if org_id:
         all_items = [item for item in all_items if _item_matches_org(item, org_id)]
@@ -469,13 +492,29 @@ async def cve_detail(cve_id: str) -> dict[str, object]:
     return asdict(record)
 
 
-@router.post("/cves/enrich", dependencies=[Depends(require_api_key)])
-async def enrich_cves() -> dict[str, object]:
+@router.post("/cves/enrich", dependencies=[Depends(require_operator_key)])
+async def enrich_cves(payload: CveEnrichRequest | None = None) -> dict[str, object]:
+    from ..services.enrichment import enrich_cve
+    if payload and payload.cve_ids:
+        records = [await enrich_cve(cve_id) for cve_id in payload.cve_ids]
+        await _audit("cve_enrichment", "cve_enrichment", "all", message=f"Enriched {len(records)} requested CVEs from external sources/cache.")
+        return {"ok": True, "enriched": len(records), "cves": [record.cve_id for record in records], "records": [asdict(record) for record in records]}
+    # Backward-compatible bulk enrichment is deterministic and offline-safe for demo/tests;
+    # operators can force external refresh per CVE or pass cve_ids to this endpoint.
     records = build_cve_enrichments(await list_items(settings.max_items))
     for record in records:
+        record.refresh_status = "fresh"
+        record.last_refresh_attempt_at = record.enriched_at
         await save_cve_enrichment(record)
     await _audit("cve_enrichment", "cve_enrichment", "all", message=f"Enriched {len(records)} CVEs from current items.")
     return {"ok": True, "enriched": len(records), "cves": [record.cve_id for record in records]}
+
+@router.post("/cves/{cve_id}/refresh", dependencies=[Depends(require_operator_key)])
+async def refresh_cve(cve_id: str) -> dict[str, object]:
+    from ..services.enrichment import enrich_cve
+    record = await enrich_cve(cve_id, force=True)
+    await _audit("cve_refresh", "cve_enrichment", record.cve_id, message=f"Refresh status: {record.refresh_status}.")
+    return asdict(record)
 
 
 @router.post("/graph/rebuild", dependencies=[Depends(require_api_key)])
@@ -636,6 +675,7 @@ async def onboarding_template() -> dict[str, object]:
 
 
 async def build_value_report(org_id: str | None, days: int) -> dict[str, object]:
+    _validate_org_id(org_id)
     items = [item for item in await list_items(settings.max_items) if _item_matches_org(item, org_id)]
     alerts_for_org = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     countries = Counter(country for item in items for country in item.affected_countries)
@@ -690,6 +730,7 @@ def _csv_response(filename: str, rows: list[dict[str, object]]) -> Response:
 
 @router.get("/reports/customer-proof", dependencies=[Depends(require_read_api_key)])
 async def customer_proof_report(org_id: str = Query(..., min_length=1), days: int = Query(default=7, ge=1, le=90)) -> dict[str, object]:
+    _validate_org_id(org_id)
     items = [item for item in await list_items(settings.max_items) if _item_matches_org(item, org_id)]
     alerts_for_org = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     watchlists = [watchlist for watchlist in await list_watchlists() if watchlist.org_id == org_id]
@@ -739,14 +780,14 @@ async def customer_proof_report(org_id: str = Query(..., min_length=1), days: in
     }
 
 
-@router.post("/feedback/item/{item_id}", dependencies=[Depends(require_api_key)], status_code=status.HTTP_201_CREATED)
+@router.post("/feedback/item/{item_id}", dependencies=[Depends(require_operator_key)], status_code=status.HTTP_201_CREATED)
 async def create_item_feedback(item_id: str, payload: ItemFeedbackCreate) -> dict[str, object]:
     feedback = ItemFeedback(
         id=str(uuid.uuid4()),
         item_id=item_id,
         relevance=payload.relevance,
         severity_feedback=payload.severity_feedback,
-        org_id=payload.org_id.strip(),
+        org_id=_validate_org_id(payload.org_id.strip()) or payload.org_id.strip(),
         comment=payload.comment.strip(),
         created_at=now_iso(),
     )
@@ -757,18 +798,20 @@ async def create_item_feedback(item_id: str, payload: ItemFeedbackCreate) -> dic
     return {"ok": True, "feedback_id": saved.id, "item_id": saved.item_id}
 
 
-@router.get("/feedback", dependencies=[Depends(require_api_key)])
+@router.get("/feedback", dependencies=[Depends(require_operator_key)])
 async def feedback(
     org_id: str | None = Query(default=None, min_length=1, max_length=80),
     item_id: str | None = Query(default=None, min_length=1, max_length=200),
     relevance: str | None = Query(default=None, pattern="^(useful|not_useful|false_positive)$"),
     limit: int = Query(default=200, ge=1, le=500),
 ) -> list[dict[str, object]]:
+    _validate_org_id(org_id)
     return [asdict(item) for item in await list_item_feedback(limit, org_id=org_id, item_id=item_id, relevance=relevance)]
 
 
 @router.get("/export/alerts.csv", dependencies=[Depends(require_read_api_key)])
 async def export_alerts_csv(org_id: str | None = None) -> Response:
+    _validate_org_id(org_id)
     rows = [alert_to_dict(alert) for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
     return _csv_response("alerts.csv", rows)
 
@@ -807,30 +850,146 @@ async def telegram_send(alert_id: str) -> dict[str, object]:
         await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message=f"Telegram send failed: {type(exc).__name__}.")
         raise HTTPException(status_code=502, detail="Telegram send failed.") from exc
 
+async def _run_job(job_id: str, job_type: str) -> None:
+    job = await get_background_job(job_id)
+    if not job:
+        return
+    job.status = "running"; job.started_at = now_iso()
+    await save_background_job(job)
+    await _audit("job_started", "background_job", job.id, message=f"Started {job.job_type} job.")
+    try:
+        if job_type == "feed_refresh":
+            result = await refresh_store(force=True)
+            job.result_summary = f"Refresh complete: {result.get('items_count', result.get('items', 'ok'))}"
+        elif job_type == "cve_enrichment":
+            result = await enrich_cves(None)
+            job.result_summary = f"Enriched {result.get('enriched', 0)} CVEs"
+        elif job_type == "graph_rebuild":
+            result = await rebuild_graph()
+            job.result_summary = f"Built {result.get('entities', 0)} entities and {result.get('edges', 0)} edges"
+        elif job_type == "cluster_rebuild":
+            result = await rebuild_clusters()
+            job.result_summary = f"Built {result.get('clusters', 0)} clusters"
+        elif job_type == "review_generate":
+            result = await generate_review_queue()
+            job.result_summary = f"Created {result.get('created', 0)} review items"
+        elif job_type == "rematch":
+            result = await rematch(None)
+            job.result_summary = f"Rematched {result.get('items_checked', 0)} items"
+        job.status = "succeeded"
+    except Exception as exc:
+        job.status = "failed"; job.error_message = f"{type(exc).__name__}: {exc}"[:500]
+    job.finished_at = now_iso()
+    await save_background_job(job)
+    await _audit("job_finished", "background_job", job.id, message=f"Finished {job.job_type} job with status {job.status}.")
+
+
+@router.post("/jobs/{job_type}", dependencies=[Depends(require_operator_key)], status_code=202)
+async def create_job(job_type: str, background_tasks: BackgroundTasks) -> dict[str, object]:
+    if job_type not in JOB_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported job_type")
+    job = BackgroundJob(id=str(uuid.uuid4()), job_type=job_type, status="queued", created_at=now_iso())
+    await save_background_job(job)
+    background_tasks.add_task(_run_job, job.id, job.job_type)
+    return asdict(job)
+
+
+@router.get("/jobs", dependencies=[Depends(require_read_api_key)])
+async def jobs(limit: int = Query(default=50, ge=1, le=200)) -> list[dict[str, object]]:
+    return [asdict(job) for job in await list_background_jobs(limit)]
+
+
+@router.get("/jobs/{job_id}", dependencies=[Depends(require_read_api_key)])
+async def job_detail(job_id: str) -> dict[str, object]:
+    job = await get_background_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return asdict(job)
+
+
+@router.get("/intelligence-quality", dependencies=[Depends(require_read_api_key)])
+async def intelligence_quality(org_id: str | None = None) -> dict[str, object]:
+    _validate_org_id(org_id)
+    items = [item for item in await list_items(settings.max_items) if _item_matches_org(item, org_id)]
+    cve_values = {cve for item in items for cve in item_cves(item)}
+    enrichments = await list_cve_enrichments(limit=5000)
+    enriched = [e for e in enrichments if e.cve_id in cve_values and e.refresh_status != "failed"]
+    clusters_ = await list_intel_clusters(limit=1000)
+    sources_ = await list_source_health()
+    feedback_ = await list_item_feedback(limit=1000, org_id=org_id, relevance="false_positive")
+    total = len(items)
+    items_with_cves = len([item for item in items if item_cves(item)])
+    items_with_watchlist_matches = len([item for item in items if item.watchlist_matches])
+    items_with_evidence_links = len([item for item in items if item.evidence_links])
+    multi_source_clusters = len([c for c in clusters_ if c.corroboration_level in {"multi_source", "strong"}])
+    stale_cve_enrichments = len([e for e in enrichments if e.refresh_status in {"stale", "failed"}])
+    failing_sources = len([s for s in sources_ if s.status == "failing"])
+    average_confidence_score = round(sum(item.confidence_score for item in items) / total, 1) if total else 0
+    score = 0
+    if total:
+        score += 20 * (items_with_cves / total)
+        score += 15 * (items_with_watchlist_matches / total)
+        score += 15 * (items_with_evidence_links / total)
+        score += min(15, average_confidence_score * 0.15)
+    if cve_values:
+        score += 15 * (len(enriched) / len(cve_values))
+    score += 10 if multi_source_clusters else 0
+    score += 10 if not failing_sources else max(0, 10 - failing_sources * 2)
+    score -= min(15, len(feedback_) * 3)
+    quality_score = max(0, min(100, round(score)))
+    gaps = []
+    if cve_values and len(enriched) < len(cve_values): gaps.append("Enrich all observed CVEs from NVD/CISA/EPSS.")
+    if not items_with_evidence_links: gaps.append("Add evidence links for customer-verifiable reporting.")
+    if failing_sources: gaps.append("Fix failing source feeds.")
+    if not multi_source_clusters: gaps.append("Increase source corroboration and cluster rebuild cadence.")
+    return {"total_items": total, "items_with_cves": items_with_cves, "enriched_cves": len(enriched), "items_with_watchlist_matches": items_with_watchlist_matches, "items_with_evidence_links": items_with_evidence_links, "multi_source_clusters": multi_source_clusters, "stale_cve_enrichments": stale_cve_enrichments, "failing_sources": failing_sources, "false_positive_feedback_count": len(feedback_), "average_confidence_score": average_confidence_score, "quality_score": quality_score, "top_quality_gaps": gaps[:5], "next_actions": gaps[:3] or ["Maintain enrichment, source-health, and review cadence."]}
+
+
+@router.get("/brief/weekly", dependencies=[Depends(require_read_api_key)])
+async def weekly_brief(org_id: str = Query(default=settings.default_org), days: int = Query(default=7, ge=1, le=90)) -> dict[str, object]:
+    _validate_org_id(org_id)
+    items = [item for item in await list_items(settings.max_items) if _item_matches_org(item, org_id)]
+    alerts_for_org = [alert for alert in await list_alerts() if _alert_matches_org(alert, org_id)]
+    cve_ids = sorted({cve for item in items for cve in item_cves(item)})
+    enrichments = {e.cve_id: e for e in await list_cve_enrichments(limit=5000)}
+    exploited = [cve for cve in cve_ids if enrichments.get(cve) and enrichments[cve].cisa_kev]
+    unresolved = [alert_to_dict(a) for a in alerts_for_org if a.status not in {"resolved", "false_positive"}]
+    resolved = [alert_to_dict(a) for a in alerts_for_org if a.status in {"resolved", "false_positive"}]
+    top = sorted(items, key=lambda i: (i.risk_score, i.ingested_at), reverse=True)[:5]
+    sources_ = await list_source_health()
+    return {"executive_summary": f"POLARIS monitored {len(items)} signals and {len(alerts_for_org)} alerts for {org_id} over {days} days.", "top_risks": [item_to_dict(i) for i in top], "new_cves": cve_ids, "exploited_cves": exploited, "clusters": [asdict(c) for c in await list_intel_clusters(limit=20)], "unresolved_alerts": unresolved, "resolved_alerts": resolved, "recommended_actions": list(dict.fromkeys([i.recommended_action for i in top if i.recommended_action]))[:5], "source_health_notes": [f"{s.source_url}: {s.status}" for s in sources_], "proof_summary": await customer_proof_report(org_id, days)}
+
+
+@router.get("/reports/customer-proof.html", dependencies=[Depends(require_read_api_key)])
+async def customer_proof_html(org_id: str = Query(default=settings.default_org), days: int = Query(default=7, ge=1, le=90)) -> Response:
+    report = await customer_proof_report(org_id, days)
+    html = f"""<!doctype html><html><head><title>POLARIS Customer Proof Report</title><style>body{{font-family:Arial,sans-serif;max-width:900px;margin:32px auto;line-height:1.5}} h1,h2{{color:#0f172a}} .card{{border:1px solid #cbd5e1;border-radius:10px;padding:16px;margin:12px 0}} @media print{{button{{display:none}}}}</style></head><body><button onclick='window.print()'>Print to PDF</button><h1>POLARIS Customer Proof Report</h1><p><b>Organization:</b> {org_id} | <b>Period:</b> {days} days | <b>Generated:</b> {now_iso()}</p><div class='card'><h2>Proof summary</h2><p>{report['proof_summary']}</p></div><div class='card'><h2>Top risks</h2><ul>{''.join(f'<li>{risk}</li>' for risk in report['top_3_risks'])}</ul></div><div class='card'><h2>Top actions</h2><ul>{''.join(f'<li>{action}</li>' for action in report['top_3_recommended_actions'])}</ul></div><div class='card'><h2>Alert status summary</h2><p>Open: {report['alerts_open']} | Resolved: {report['alerts_resolved']} | Total: {report['alerts_generated']}</p></div><div class='card'><h2>Source health</h2><pre>{report['source_health_summary']}</pre></div><div class='card'><h2>CVE enrichment summary</h2><p>Tracked: {report['cves_tracked']} | Enriched: {report['enriched_cves']}</p></div><div class='card'><h2>Clusters summary</h2><p>Clusters: {report['clusters_detected']} | Multi-source: {report['multi_source_clusters']}</p></div></body></html>"""
+    return Response(content=html, media_type="text/html")
+
 
 @router.get("/source-configs", dependencies=[Depends(require_read_api_key)])
 async def source_configs() -> list[dict[str, object]]:
     return [asdict(source) for source in await list_source_configs()]
 
 
-@router.post("/source-configs", dependencies=[Depends(require_api_key)], status_code=201)
+@router.post("/source-configs", dependencies=[Depends(require_operator_key)], status_code=201)
 async def create_source_config(payload: SourceConfigCreate) -> dict[str, object]:
-    source = SourceConfig(id=str(uuid.uuid4()), url=payload.url.strip(), label=payload.label.strip(), category=payload.category, enabled=payload.enabled, created_at=now_iso())
+    source = SourceConfig(id=str(uuid.uuid4()), url=payload.url.strip(), label=payload.label.strip(), category=payload.category, enabled=payload.enabled, created_at=now_iso(), trust_tier=payload.trust_tier, source_type=payload.source_type, country_focus=payload.country_focus, sector_focus=payload.sector_focus, notes=payload.notes.strip())
     saved = await add_source_config(source)
     await _audit("source_config_create", "source_config", saved.id, message=f"Created source config {saved.label}.")
     return asdict(saved)
 
 
-@router.patch("/source-configs/{source_id}", dependencies=[Depends(require_api_key)])
+@router.patch("/source-configs/{source_id}", dependencies=[Depends(require_operator_key)])
 async def patch_source_config(source_id: str, payload: SourceConfigUpdate) -> dict[str, object]:
-    source = await update_source_config(source_id, url=payload.url.strip() if payload.url else None, label=payload.label.strip() if payload.label else None, category=payload.category, enabled=payload.enabled)
+    source = await update_source_config(source_id, url=payload.url.strip() if payload.url else None, label=payload.label.strip() if payload.label else None, category=payload.category, enabled=payload.enabled, trust_tier=payload.trust_tier, source_type=payload.source_type, country_focus=payload.country_focus, sector_focus=payload.sector_focus, notes=payload.notes.strip() if payload.notes is not None else None)
     if not source:
         raise HTTPException(status_code=404, detail="Source config not found")
     await _audit("source_config_update", "source_config", source.id, message=f"Updated source config {source.label}.")
     return asdict(source)
 
 
-@router.delete("/source-configs/{source_id}", dependencies=[Depends(require_api_key)], status_code=204)
+@router.delete("/source-configs/{source_id}", dependencies=[Depends(require_operator_key)], status_code=204)
 async def remove_source_config(source_id: str) -> Response:
     if not await delete_source_config(source_id):
         raise HTTPException(status_code=404, detail="Source config not found")
@@ -840,11 +999,13 @@ async def remove_source_config(source_id: str) -> Response:
 
 @router.get("/org-profile", dependencies=[Depends(require_read_api_key)])
 async def org_profile(org_id: str = Query(default=settings.default_org)) -> dict[str, object]:
+    _validate_org_id(org_id)
     return asdict(await get_org_profile(org_id))
 
 
 @router.put("/org-profile", dependencies=[Depends(require_api_key)])
 async def save_org_profile(payload: OrgScoringProfileIn, org_id: str = Query(default=settings.default_org)) -> dict[str, object]:
+    _validate_org_id(org_id)
     clean = lambda values: [value.strip() for value in values if value.strip()]
     profile = OrgScoringProfile(org_id=org_id, high_priority_countries=clean(payload.high_priority_countries), high_priority_sectors=clean(payload.high_priority_sectors), risk_boost_keywords=clean(payload.risk_boost_keywords), risk_reduce_keywords=clean(payload.risk_reduce_keywords))
     return asdict(await put_org_profile(profile))
