@@ -135,3 +135,21 @@ def test_source_config_trust_output_and_disabled_source() -> None:
     data = c.get("/api/source-configs").json()
     assert data[0]["trust_tier"] == "High"
     assert data[0]["enabled"] is False
+
+
+def test_rematch_background_job_succeeds() -> None:
+    c = client()
+    c.post("/api/seed")
+    job = c.post("/api/jobs/rematch").json()
+    detail = c.get(f"/api/jobs/{job['id']}").json()
+    assert detail["status"] == "succeeded", detail.get("error_message")
+    assert detail["result_summary"].startswith("Rematched")
+
+
+def test_watchlist_detail_requires_read_key_when_reads_protected(monkeypatch) -> None:
+    c = client()
+    monkeypatch.setenv("POLARIS_ADMIN_API_KEY", "admin-secret")
+    created = c.post("/api/watchlists", json={"name": "Detail guard", "keywords": ["pipeline"]}, headers={"X-Polaris-API-Key": "admin-secret"}).json()
+    monkeypatch.setenv("POLARIS_PROTECT_READS", "true")
+    assert c.get(f"/api/watchlists/{created['id']}").status_code == 401
+    assert c.get(f"/api/watchlists/{created['id']}", headers={"X-Polaris-API-Key": "admin-secret"}).status_code == 200

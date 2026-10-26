@@ -15,6 +15,12 @@ depends_on = None
 
 
 def upgrade() -> None:
+    import asyncio
+
+    from src.database import init_db
+
+    # init_db() is the full idempotent schema; run it first so the ALTERs below work on an empty database.
+    asyncio.run(init_db())
     op.execute("""
     CREATE TABLE IF NOT EXISTS cve_enrichments (
         cve_id TEXT PRIMARY KEY, severity TEXT, cvss_score DOUBLE PRECISION, epss_score DOUBLE PRECISION,

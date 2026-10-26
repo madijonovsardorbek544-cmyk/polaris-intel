@@ -18,9 +18,11 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    import psycopg
+    from sqlalchemy import create_engine
     url = os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
-    with psycopg.connect(url) as connection:
+    # Alembic needs a SQLAlchemy connection; route postgres:// and postgresql:// URLs to the installed psycopg 3 driver.
+    url = url.replace("postgres://", "postgresql://", 1).replace("postgresql://", "postgresql+psycopg://", 1)
+    with create_engine(url).connect() as connection:
         context.configure(connection=connection, target_metadata=None)
         with context.begin_transaction():
             context.run_migrations()
