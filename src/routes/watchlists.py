@@ -67,7 +67,7 @@ async def get_watchlists(org_id: str | None = None) -> list[Watchlist]:
     return watchlists
 
 
-@router.get("/{watchlist_id}", response_model=WatchlistOut)
+@router.get("/{watchlist_id}", response_model=WatchlistOut, dependencies=[Depends(require_read_api_key)])
 async def watchlist_detail(watchlist_id: str) -> Watchlist:
     watchlist = await get_watchlist(watchlist_id)
     if not watchlist:

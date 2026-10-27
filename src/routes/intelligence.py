@@ -880,7 +880,7 @@ async def _run_job(job_id: str, job_type: str) -> None:
             result = await generate_review_queue()
             job.result_summary = f"Created {result.get('created', 0)} review items"
         elif job_type == "rematch":
-            result = await rematch(None)
+            result = await rematch(None, limit=200)
             job.result_summary = f"Rematched {result.get('items_checked', 0)} items"
         job.status = "succeeded"
     except Exception as exc:
