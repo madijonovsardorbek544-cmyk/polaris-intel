@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from .auth import any_key_configured, open_access_allowed
 from .config import settings
 from .database import increment_public_metric, init_db, list_items
 from .routes.health import router as health_router
@@ -33,6 +34,11 @@ _bg_task_started = False
 async def startup_event() -> None:
     global _bg_task_started
     await init_db()
+    if not any_key_configured():
+        if open_access_allowed():
+            logger.warning("POLARIS_ALLOW_OPEN_ACCESS=true: all endpoints are open. Use only for local development.")
+        else:
+            logger.critical("No POLARIS API key configured: protected endpoints will reject every request. Set POLARIS_ADMIN_API_KEY.")
     try:
         await refresh_store(force=False)
     except Exception as exc:
@@ -57,7 +63,7 @@ async def _page_context(request: Request) -> dict[str, object]:
         "status": refresh_status(),
         "default_org": settings.default_org,
         "demo_mode": not bool(settings.database_url),
-        "api_key_configured": bool(settings.api_key),
+        "api_key_configured": any_key_configured(),
     }
 
 
