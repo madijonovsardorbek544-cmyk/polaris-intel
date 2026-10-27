@@ -77,6 +77,7 @@ pytest.ini
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+export POLARIS_ALLOW_OPEN_ACCESS=true   # local only; otherwise set POLARIS_ADMIN_API_KEY
 uvicorn src.main:app --reload
 ```
 
@@ -88,12 +89,16 @@ Create a local `.env` file if you want to override defaults:
 
 ```env
 POLARIS_API_KEY=
+# Required: generate with python -c "import secrets; print(secrets.token_hex(32))"
 POLARIS_ADMIN_API_KEY=
 POLARIS_OPERATOR_API_KEY=
 POLARIS_READONLY_API_KEY=
 POLARIS_ALLOWED_ORGS=
 NVD_API_KEY=
-POLARIS_PROTECT_READS=false
+# Empty = protected when DATABASE_URL is set, public in demo-memory mode
+POLARIS_PROTECT_READS=
+# Local development only: true allows keyless access to every endpoint
+POLARIS_ALLOW_OPEN_ACCESS=false
 POLARIS_DEFAULT_ORG=demo
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
@@ -106,11 +111,13 @@ FEEDS=
 LOG_LEVEL=INFO
 ```
 
-- `POLARIS_API_KEY`: optional legacy API key. If empty, demo writes are allowed. If set, it remains a backward-compatible admin fallback.
+- `POLARIS_API_KEY`: legacy admin key, kept as a backward-compatible fallback for `POLARIS_ADMIN_API_KEY`.
+- **Closed by default:** if no admin, operator, readonly or legacy key is set, every protected endpoint returns HTTP 401 and startup logs a critical warning. Public pages, public reads in demo-memory mode, `/health` and `POST /api/leads` stay open.
+- `POLARIS_ALLOW_OPEN_ACCESS`: default `false`. Set `true` only for local development to allow keyless writes. Never set it on a shared deployment.
 - `POLARIS_ADMIN_API_KEY`, `POLARIS_OPERATOR_API_KEY`, `POLARIS_READONLY_API_KEY`: optional role-specific API keys for production pilots.
 - `POLARIS_ALLOWED_ORGS`: optional comma-separated allowed org IDs. When set, invalid `org_id` values are rejected with HTTP 400.
 - `NVD_API_KEY`: optional NVD API key for CVE enrichment; unauthenticated NVD access is attempted when omitted.
-- `POLARIS_PROTECT_READS`: default `false`. When `true` and `POLARIS_API_KEY` is set, read endpoints require `X-Polaris-API-Key` too.
+- `POLARIS_PROTECT_READS`: when unset, reads are protected in database mode (`DATABASE_URL` set) and public in demo-memory mode. `true`/`false` overrides that. When protected, read endpoints require `X-Polaris-API-Key` too.
 - `POLARIS_DEFAULT_ORG`: default single-org context for the dashboard and omitted watchlist `org_id` values. Defaults to `demo`.
 - `TELEGRAM_BOT_TOKEN`: enables Telegram sending when paired with `TELEGRAM_CHAT_ID`; preview formatting works without credentials.
 - `TELEGRAM_CHAT_ID`: destination chat for Telegram sending when paired with `TELEGRAM_BOT_TOKEN`; tokens and chat IDs are never shown in the dashboard.
@@ -318,7 +325,7 @@ POLARIS_API_KEY=<strong-random-key>
 POLARIS_PROTECT_READS=false
 ```
 
-With those settings, the dashboard and read endpoints remain publicly viewable, while write actions return HTTP 401 unless the operator sends `X-Polaris-API-Key`. If `POLARIS_API_KEY` is empty, write actions are intentionally open only for local development and private demos.
+With those settings, the dashboard and read endpoints remain publicly viewable, while write actions return HTTP 401 unless the operator sends `X-Polaris-API-Key`. If no key is configured, write actions are rejected. For keyless local development, set `POLARIS_ALLOW_OPEN_ACCESS=true`.
 
 ### A) Render deployment
 
