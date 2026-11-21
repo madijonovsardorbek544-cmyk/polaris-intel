@@ -123,6 +123,12 @@ async def refresh_store(force: bool = False) -> dict[str, Any]:
 
     if merged:
         await save_items(merged)
+        from .briefing import auto_alert  # briefing imports this module
+
+        try:
+            await auto_alert(merged)
+        except Exception as exc:
+            logger.warning("Auto alerting failed error_type=%s message=%s", type(exc).__name__, str(exc))
         _LAST_REFRESH_STATUS = "OK"
         logger.info("Feed refresh success items=%s failed_feeds=%s empty_feeds=%s", len(merged), failed_feeds, empty_feeds)
     else:

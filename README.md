@@ -559,6 +559,15 @@ The default feeds include the CISA Known Exploited Vulnerabilities catalog. Each
 
 Geopolitical escalation terms now match whole words only, so cyber items mentioning "malware", "software" or "warning" no longer pick up a false "war" escalation signal.
 
+## Hands-off alerting
+
+After every feed refresh (startup, the background loop, or `POST /api/refresh`), POLARIS saves alerts for new High and Critical items that match a watchlist, with no operator click needed. When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, each new **Critical** alert is also pushed to Telegram, at most 5 per refresh so a first run over a backlog doesn't flood the chat. Every send is recorded on the alert's timeline.
+
+- `POLARIS_AUTO_ALERTS=false` turns automatic alert creation off. `POST /api/alerts/generate` still works.
+- `POLARIS_TELEGRAM_AUTO_SEND=false` keeps automatic alerts but leaves Telegram sending manual.
+
+Together with the CISA KEV feed, a customer only needs to put their tech stack in a watchlist. They get a Telegram message when something they run is actively exploited.
+
 ## Toward Recorded Future-style intelligence
 
 POLARIS now has a first serious intelligence layer beyond item listing. It is still intentionally deterministic and explainable for controlled pilot demos, but it can model relationships between risks, evidence, entities, sources, watchlists, clusters, and analyst review work.
