@@ -538,6 +538,10 @@ POLARIS can run in demo-memory mode for local evaluation, but real pilot users r
 - `POST /api/leads` has been tested from the public pilot request form.
 - The full pilot workflow has been tested: watchlist -> rematch -> alerts -> proof report.
 - A backup and restore plan exists for the PostgreSQL database before real customer data is entered.
+- `POLARIS_ENV=production` is set. The app then refuses to start unless `DATABASE_URL` and an admin or role key are set, reads are protected, and `POLARIS_ALLOW_OPEN_ACCESS` is not `true`. A misconfigured customer deployment fails loudly instead of running open.
+- Run a single worker per deployment. The refresh loop, jobs and rate limits live in-process.
+- The start command passes `--forwarded-allow-ips='*'`, so the lead-form rate limit sees the visitor's IP behind the Render or Railway proxy rather than the proxy's. Use it only behind such a proxy. If the Render service was created before this change, update its start command in the dashboard too.
+- Tenancy: run one deployment per customer, with `POLARIS_ALLOWED_ORGS` set to that customer's org. Org filters exist, but keys are not yet bound to an org, so a shared multi-customer deployment is not isolated.
 
 Recommended local verification:
 

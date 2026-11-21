@@ -55,6 +55,22 @@ def protect_reads() -> bool:
     return settings.protect_reads or database_mode()
 
 
+def production_config_errors() -> list[str]:
+    """Settings that must hold when POLARIS_ENV=production; startup refuses to run otherwise."""
+    if os.getenv("POLARIS_ENV", "").strip().lower() != "production":
+        return []
+    errors = []
+    if not database_mode():
+        errors.append("DATABASE_URL is required; demo-memory mode loses customer data on restart.")
+    if not any_key_configured():
+        errors.append("POLARIS_ADMIN_API_KEY (or a role key) is required.")
+    if open_access_allowed():
+        errors.append("POLARIS_ALLOW_OPEN_ACCESS must not be true.")
+    if not protect_reads():
+        errors.append("POLARIS_PROTECT_READS must not be false.")
+    return errors
+
+
 def _require_configured_keys() -> bool:
     """Return True when the request may skip key checks; raise when no key is configured."""
     if any_key_configured():

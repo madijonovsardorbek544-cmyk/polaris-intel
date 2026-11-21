@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from .auth import any_key_configured, open_access_allowed
+from .auth import any_key_configured, open_access_allowed, production_config_errors
 from .config import settings
 from .database import increment_public_metric, init_db, list_items
 from .routes.health import router as health_router
@@ -33,6 +33,9 @@ _bg_task_started = False
 @app.on_event("startup")
 async def startup_event() -> None:
     global _bg_task_started
+    errors = production_config_errors()
+    if errors:
+        raise RuntimeError("POLARIS_ENV=production refused to start: " + " ".join(errors))
     await init_db()
     if not any_key_configured():
         if open_access_allowed():
