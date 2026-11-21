@@ -77,7 +77,7 @@ async def home(request: Request) -> HTMLResponse:
     except Exception as exc:
         logger.warning("Landing refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
     await increment_public_metric("landing_page_views")
-    return templates.TemplateResponse("index.html", await _page_context(request))
+    return templates.TemplateResponse(request, "index.html", await _page_context(request))
 
 
 @app.get("/demo", response_class=HTMLResponse)
@@ -87,7 +87,7 @@ async def demo(request: Request) -> HTMLResponse:
     except Exception as exc:
         logger.warning("Demo refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
     await increment_public_metric("demo_page_views")
-    return templates.TemplateResponse("demo.html", await _page_context(request))
+    return templates.TemplateResponse(request, "demo.html", await _page_context(request))
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -96,12 +96,12 @@ async def dashboard(request: Request) -> HTMLResponse:
         await refresh_store(force=False)
     except Exception as exc:
         logger.warning("Dashboard refresh failed error_type=%s message=%s", type(exc).__name__, str(exc))
-    return templates.TemplateResponse("dashboard.html", await _page_context(request))
+    return templates.TemplateResponse(request, "dashboard.html", await _page_context(request))
 
 
 @app.get("/request-pilot", response_class=HTMLResponse)
 async def request_pilot(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("request_pilot.html", await _page_context(request))
+    return templates.TemplateResponse(request, "request_pilot.html", await _page_context(request))
 
 
 @app.get("/latest")
