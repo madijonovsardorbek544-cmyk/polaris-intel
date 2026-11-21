@@ -10,7 +10,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 
-from ..auth import require_admin_key, require_api_key, require_operator_key, require_read_api_key
+from ..auth import any_key_configured, protect_reads, require_admin_key, require_api_key, require_operator_key, require_read_api_key
 from ..config import settings
 from ..database import add_admin_audit_event, add_alert_event, add_item_feedback, add_pilot_lead, add_source_config, database_enabled, delete_source_config, get_alert, get_background_job, get_cve_enrichment, get_intel_cluster, get_intel_entity, get_item, get_org_profile, get_public_metrics, increment_public_metric, list_admin_audit_events, list_alert_events, list_alerts, list_background_jobs, list_cve_enrichments, list_intel_clusters, list_intel_edges, list_intel_entities, list_item_feedback, list_items, list_pilot_leads, list_review_queue, list_source_configs, list_source_health, list_watchlists, put_org_profile, replace_intel_clusters, replace_intel_graph, reset_memory_state, save_alerts_with_counts, save_background_job, save_cve_enrichment, save_items, save_review_queue_item, update_alert, update_pilot_lead_status, update_review_queue_item, update_source_config
 from ..models import AdminAuditEvent, Alert, AlertEvent, BackgroundJob, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
@@ -214,8 +214,8 @@ async def pilot_readiness() -> dict[str, object]:
     sources_available = bool(source_health or source_configs or settings.feeds)
     checks = {
         "database_enabled": database_enabled(),
-        "api_key_configured": bool(settings.api_key.strip()),
-        "read_protection_enabled": bool(settings.protect_reads),
+        "api_key_configured": any_key_configured(),
+        "read_protection_enabled": protect_reads(),
         "lead_endpoint_working": True,
         "items_available": items_available,
         "sources_available": sources_available,
@@ -629,8 +629,8 @@ async def intelligence_maturity() -> dict[str, object]:
         "watchlists": len(await list_watchlists()),
         "alerts": len(await list_alerts()),
         "database": database_enabled(),
-        "api_key": bool(settings.api_key.strip()),
-        "protect_reads": bool(settings.protect_reads),
+        "api_key": any_key_configured(),
+        "protect_reads": protect_reads(),
     })
 
 

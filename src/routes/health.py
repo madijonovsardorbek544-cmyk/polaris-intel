@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Response
 
+from ..auth import any_key_configured, protect_reads
 from ..config import settings
 from ..database import database_enabled, list_alerts, list_items, list_source_health
 from ..services.ingestion import refresh_status
@@ -26,8 +27,8 @@ async def health() -> dict[str, object]:
         "version": settings.app_version,
         "mode": "database" if db_enabled else "demo-memory",
         "database": db_enabled,
-        "api_key_configured": bool(settings.api_key),
-        "read_protection_enabled": settings.protect_reads,
+        "api_key_configured": any_key_configured(),
+        "read_protection_enabled": protect_reads(),
         "default_org": settings.default_org,
         "feeds": len(settings.feeds),
         "items": len(items),
