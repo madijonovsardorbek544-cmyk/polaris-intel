@@ -19,11 +19,21 @@ def c(monkeypatch) -> TestClient:
     return TestClient(app)
 
 
-def test_writes_fail_closed_when_no_key_configured(c) -> None:
+def test_writes_fail_closed_in_database_mode_without_key(c, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
     for path in ["/api/demo/reset", "/api/watchlists", "/api/seed"]:
         res = c.post(path, json={"name": "x", "keywords": ["x"]})
         assert res.status_code == 401, path
         assert "No POLARIS API key is configured" in res.json()["detail"]
+
+
+def test_explicit_false_requires_key_even_in_demo_memory(c, monkeypatch) -> None:
+    monkeypatch.setenv("POLARIS_ALLOW_OPEN_ACCESS", "false")
+    assert c.post("/api/seed").status_code == 401
+
+
+def test_demo_memory_without_key_stays_open(c) -> None:
+    assert c.post("/api/seed").status_code == 200
 
 
 def test_public_reads_and_lead_form_stay_open_in_demo_memory(c) -> None:
@@ -34,6 +44,8 @@ def test_public_reads_and_lead_form_stay_open_in_demo_memory(c) -> None:
 
 
 def test_open_access_opt_in_restores_keyless_dev_mode(c, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    monkeypatch.setenv("POLARIS_PROTECT_READS", "false")
     monkeypatch.setenv("POLARIS_ALLOW_OPEN_ACCESS", "true")
     assert c.post("/api/seed").status_code == 200
 

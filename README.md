@@ -77,7 +77,6 @@ pytest.ini
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export POLARIS_ALLOW_OPEN_ACCESS=true   # local only; otherwise set POLARIS_ADMIN_API_KEY
 uvicorn src.main:app --reload
 ```
 
@@ -97,8 +96,8 @@ POLARIS_ALLOWED_ORGS=
 NVD_API_KEY=
 # Empty = protected when DATABASE_URL is set, public in demo-memory mode
 POLARIS_PROTECT_READS=
-# Local development only: true allows keyless access to every endpoint
-POLARIS_ALLOW_OPEN_ACCESS=false
+# Empty = keyless access allowed only in demo-memory mode; false = always require a key
+POLARIS_ALLOW_OPEN_ACCESS=
 POLARIS_DEFAULT_ORG=demo
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
@@ -112,8 +111,8 @@ LOG_LEVEL=INFO
 ```
 
 - `POLARIS_API_KEY`: legacy admin key, kept as a backward-compatible fallback for `POLARIS_ADMIN_API_KEY`.
-- **Closed by default:** if no admin, operator, readonly or legacy key is set, every protected endpoint returns HTTP 401 and startup logs a critical warning. Public pages, public reads in demo-memory mode, `/health` and `POST /api/leads` stay open.
-- `POLARIS_ALLOW_OPEN_ACCESS`: default `false`. Set `true` only for local development to allow keyless writes. Never set it on a shared deployment.
+- **Closed by default with real data:** in database mode (`DATABASE_URL` set) with no admin, operator, readonly or legacy key, every protected endpoint returns HTTP 401 and startup logs a critical warning. In demo-memory mode without a key, the app stays open (only public feed data, wiped on restart) and logs a warning. `/health`, public pages and `POST /api/leads` are always open.
+- `POLARIS_ALLOW_OPEN_ACCESS`: unset follows the rule above. `false` requires a key even in demo-memory mode (recommended for any shared demo); `true` allows keyless access everywhere (local development only).
 - `POLARIS_ADMIN_API_KEY`, `POLARIS_OPERATOR_API_KEY`, `POLARIS_READONLY_API_KEY`: optional role-specific API keys for production pilots.
 - `POLARIS_ALLOWED_ORGS`: optional comma-separated allowed org IDs. When set, invalid `org_id` values are rejected with HTTP 400.
 - `NVD_API_KEY`: optional NVD API key for CVE enrichment; unauthenticated NVD access is attempted when omitted.
@@ -325,7 +324,7 @@ POLARIS_API_KEY=<strong-random-key>
 POLARIS_PROTECT_READS=false
 ```
 
-With those settings, the dashboard and read endpoints remain publicly viewable, while write actions return HTTP 401 unless the operator sends `X-Polaris-API-Key`. If no key is configured, write actions are rejected. For keyless local development, set `POLARIS_ALLOW_OPEN_ACCESS=true`.
+With those settings, the dashboard and read endpoints remain publicly viewable, while write actions return HTTP 401 unless the operator sends `X-Polaris-API-Key`. Without a key, a demo-memory deployment leaves write actions open and a database deployment rejects them.
 
 ### A) Render deployment
 

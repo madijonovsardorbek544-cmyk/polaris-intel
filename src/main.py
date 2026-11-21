@@ -36,7 +36,7 @@ async def startup_event() -> None:
     await init_db()
     if not any_key_configured():
         if open_access_allowed():
-            logger.warning("POLARIS_ALLOW_OPEN_ACCESS=true: all endpoints are open. Use only for local development.")
+            logger.warning("No POLARIS API key configured and open access is allowed (demo-memory mode or POLARIS_ALLOW_OPEN_ACCESS=true): all endpoints are open. Set POLARIS_ADMIN_API_KEY before handling real data.")
         else:
             logger.critical("No POLARIS API key configured: protected endpoints will reject every request. Set POLARIS_ADMIN_API_KEY.")
     try:

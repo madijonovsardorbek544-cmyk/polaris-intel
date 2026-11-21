@@ -34,9 +34,17 @@ def any_key_configured() -> bool:
     return any(keys.values())
 
 
+def database_mode() -> bool:
+    return bool(os.getenv("DATABASE_URL", settings.database_url).strip())
+
+
 def open_access_allowed() -> bool:
-    """Explicit opt-in for keyless local development; never set this on a shared deployment."""
-    return _truthy(os.getenv("POLARIS_ALLOW_OPEN_ACCESS", "false"))
+    """Keyless access: explicit POLARIS_ALLOW_OPEN_ACCESS wins; unset means open only in demo-memory mode."""
+    explicit = os.getenv("POLARIS_ALLOW_OPEN_ACCESS", "").strip()
+    if explicit:
+        return _truthy(explicit)
+    # Demo-memory holds only public feed data and resets on restart; Postgres holds customer data, so fail closed.
+    return not database_mode()
 
 
 def protect_reads() -> bool:
@@ -44,7 +52,7 @@ def protect_reads() -> bool:
     if explicit:
         return _truthy(explicit)
     # Real customer data (Postgres) is private unless the operator opts out; demo-memory stays public.
-    return settings.protect_reads or bool(os.getenv("DATABASE_URL", settings.database_url).strip())
+    return settings.protect_reads or database_mode()
 
 
 def _require_configured_keys() -> bool:
