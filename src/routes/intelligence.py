@@ -16,7 +16,7 @@ from ..database import add_admin_audit_event, add_alert_event, add_item_feedback
 from ..models import AdminAuditEvent, Alert, AlertEvent, BackgroundJob, IntelligenceItem, ItemFeedback, OrgScoringProfile, PilotLead, SourceConfig
 from ..schemas import AlertUpdate, CveEnrichRequest, ItemFeedbackCreate, OrgScoringProfileIn, PilotLeadCreate, PilotLeadUpdate, SourceConfigCreate, SourceConfigUpdate
 from ..services.analysis import analyze_item, now_iso
-from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief
+from ..services.briefing import alert_to_dict, alerts_from_items, format_alert_for_telegram, generate_alerts, generate_daily_brief, send_alert_to_telegram
 from ..services.ingestion import item_to_dict, refresh_status, refresh_store, seed_demo_items
 from ..services.intelligence_layers import apply_cluster_confidence, attach_enrichments, build_clusters, build_cve_enrichments, build_graph, generate_review_items, item_cves, maturity_score
 
@@ -837,24 +837,12 @@ async def telegram_send(alert_id: str) -> dict[str, object]:
         await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert_id, event_type="telegram_failed", message="Telegram credentials missing", created_at=now_iso()))
         await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message="Telegram send attempted but credentials were missing.")
         raise HTTPException(status_code=400, detail="TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured to send Telegram alerts.")
-    import httpx
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
-                json={"chat_id": settings.telegram_chat_id, "text": format_alert_for_telegram(alert)},
-                timeout=settings.http_timeout,
-            )
-            response.raise_for_status()
-        logger.info("Telegram alert sent alert_id=%s", alert_id)
-        await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert_id, event_type="telegram_sent", message="Telegram alert sent", created_at=now_iso()))
-        await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message="Telegram alert sent.")
-        return {"ok": True, "detail": "Telegram alert sent."}
-    except Exception as exc:
-        logger.warning("Telegram alert failed alert_id=%s error_type=%s message=%s", alert_id, type(exc).__name__, str(exc))
-        await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert_id, event_type="telegram_failed", message=f"Telegram send failed: {type(exc).__name__}", created_at=now_iso()))
-        await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message=f"Telegram send failed: {type(exc).__name__}.")
-        raise HTTPException(status_code=502, detail="Telegram send failed.") from exc
+    error = await send_alert_to_telegram(alert, settings.telegram_bot_token, settings.telegram_chat_id)
+    if error:
+        await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message=f"Telegram send failed: {error}.")
+        raise HTTPException(status_code=502, detail="Telegram send failed.")
+    await _audit("telegram_send_attempt", "alert", alert_id, org_id=alert.org_id, message="Telegram alert sent.")
+    return {"ok": True, "detail": "Telegram alert sent."}
 
 async def _run_job(job_id: str, job_type: str) -> None:
     job = await get_background_job(job_id)

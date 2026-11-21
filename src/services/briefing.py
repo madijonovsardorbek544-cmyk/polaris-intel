@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+import os
 import uuid
 from collections import Counter
 from dataclasses import asdict
 from typing import Any
 
-from ..models import Alert, IntelligenceItem, SourceHealth
+from ..config import settings
+from ..database import add_alert_event, save_alerts_with_counts
+from ..models import Alert, AlertEvent, IntelligenceItem, SourceHealth
 from .analysis import now_iso
 from .ingestion import item_to_dict
 
@@ -91,6 +95,47 @@ def format_alert_for_telegram(alert: Alert | dict[str, Any]) -> str:
             f"Source/Item: {data.get('item_id') or 'unknown'}",
         ]
     )
+
+
+logger = logging.getLogger(__name__)
+AUTO_TELEGRAM_MAX_PER_REFRESH = 5
+
+
+async def send_alert_to_telegram(alert: Alert, token: str, chat_id: str) -> str | None:
+    """Send one alert and record the outcome on its timeline; returns an error type name or None."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": format_alert_for_telegram(alert)},
+                timeout=settings.http_timeout,
+            )
+            response.raise_for_status()
+    except Exception as exc:
+        logger.warning("Telegram alert failed alert_id=%s error_type=%s message=%s", alert.id, type(exc).__name__, str(exc))
+        await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert.id, event_type="telegram_failed", message=f"Telegram send failed: {type(exc).__name__}", created_at=now_iso()))
+        return type(exc).__name__
+    logger.info("Telegram alert sent alert_id=%s", alert.id)
+    await add_alert_event(AlertEvent(id=str(uuid.uuid4()), alert_id=alert.id, event_type="telegram_sent", message="Telegram alert sent", created_at=now_iso()))
+    return None
+
+
+def _env_on(name: str, default: str) -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def auto_alert(items: list[IntelligenceItem]) -> list[Alert]:
+    """After each refresh: persist new watchlist alerts and push new Critical ones to Telegram, no operator click needed."""
+    if not _env_on("POLARIS_AUTO_ALERTS", "true"):
+        return []
+    created = (await save_alerts_with_counts(alerts_from_items(items))).created_alerts
+    if settings.telegram_bot_token and settings.telegram_chat_id and _env_on("POLARIS_TELEGRAM_AUTO_SEND", "true"):
+        # Cap per refresh so a first run over an existing backlog doesn't flood the chat.
+        for alert in [a for a in created if a.risk_level == "Critical"][:AUTO_TELEGRAM_MAX_PER_REFRESH]:
+            await send_alert_to_telegram(alert, settings.telegram_bot_token, settings.telegram_chat_id)
+    return created
 
 
 def generate_daily_brief(items: list[IntelligenceItem], sources: list[SourceHealth]) -> dict[str, object]:
