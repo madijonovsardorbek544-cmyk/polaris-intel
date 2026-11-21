@@ -33,6 +33,7 @@ DEFAULT_FEEDS = [
     "https://www.cisa.gov/news-events/cybersecurity-advisories.xml",
     "https://www.cisa.gov/news-events/alerts.xml",
     "https://www.cisa.gov/news-events/ics-advisories.xml",
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
     "https://www.bleepingcomputer.com/feed/",
     "https://feeds.feedburner.com/TheHackersNews",
     "https://www.darkreading.com/rss.xml",
