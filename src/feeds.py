@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import html
+import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -50,7 +51,34 @@ def _parse_feed_fallback(xml_text: str, fallback_source: str) -> list[dict[str, 
     return output
 
 
+KEV_RECENT_DAYS = 14
+
+
+def parse_kev(json_text: str, recent_days: int = KEV_RECENT_DAYS) -> list[dict[str, str]]:
+    """CISA Known Exploited Vulnerabilities catalog: only recent additions, so the full catalog doesn't flood the store."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=recent_days)).date().isoformat()
+    output: list[dict[str, str]] = []
+    for vuln in json.loads(json_text).get("vulnerabilities", []):
+        added = str(vuln.get("dateAdded", ""))
+        cve = str(vuln.get("cveID", "")).strip()
+        if not cve or added < cutoff:
+            continue
+        product = f"{vuln.get('vendorProject', '')} {vuln.get('product', '')}".strip()
+        summary = f"{vuln.get('vulnerabilityName', '')}. {vuln.get('shortDescription', '')} Required action: {vuln.get('requiredAction', '')} CISA remediation due date: {vuln.get('dueDate', '')}."
+        if str(vuln.get("knownRansomwareCampaignUse", "")).lower() == "known":
+            summary += " Known to be used in ransomware campaigns."
+        output.append({
+            "title": f"Actively exploited: {cve} in {product}",
+            "summary": shorten(strip_html(summary), 600),
+            "source_url": f"https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext={cve}",
+            "created_at": f"{added}T00:00:00+00:00",
+        })
+    return output
+
+
 def parse_feed(xml_text: str, fallback_source: str) -> list[dict[str, str]]:
+    if xml_text.lstrip().startswith("{"):
+        return parse_kev(xml_text)
     try:
         import feedparser
     except ModuleNotFoundError:

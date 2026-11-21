@@ -553,6 +553,12 @@ uvicorn src.main:app --reload
 Then open `/dashboard`, add the API key in the Admin API key field, review the **Pilot readiness** panel, create or update a watchlist, click **Run rematch**, generate alerts, assign an owner, and confirm the customer proof report is populated.
 
 
+## Actively exploited vulnerabilities (CISA KEV)
+
+The default feeds include the CISA Known Exploited Vulnerabilities catalog. Each CVE added in the last 14 days becomes an item titled `Actively exploited: <CVE> in <vendor> <product>`. Its summary carries CISA's required action and remediation due date, and notes known ransomware use. To get an alert when something a customer runs is under active attack, add that customer's tech stack (for example `FortiOS`, `Exchange Server`, `Ivanti`) to watchlist keywords.
+
+Geopolitical escalation terms now match whole words only, so cyber items mentioning "malware", "software" or "warning" no longer pick up a false "war" escalation signal.
+
 ## Toward Recorded Future-style intelligence
 
 POLARIS now has a first serious intelligence layer beyond item listing. It is still intentionally deterministic and explainable for controlled pilot demos, but it can model relationships between risks, evidence, entities, sources, watchlists, clusters, and analyst review work.

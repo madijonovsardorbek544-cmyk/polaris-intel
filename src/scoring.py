@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
 from .entities import extract_cves
@@ -54,6 +55,12 @@ GEOPOLITICAL_ESCALATION_TERMS = [
     "war", "airstrike", "strike", "missile", "drone", "invasion", "sanction",
     "escalation", "nuclear", "border", "military", "ceasefire", "conflict",
 ]
+# Whole words (plus plural) so "war" doesn't fire on "malware", "software" or "warning".
+_ESCALATION_RE = re.compile(r"\b(" + "|".join(GEOPOLITICAL_ESCALATION_TERMS) + r")(s|es)?\b")
+
+
+def _escalation_hits(text: str) -> list[str]:
+    return list(dict.fromkeys(match.group(1) for match in _ESCALATION_RE.finditer(text)))
 CYBER_RISK_TERMS = {
     "ransomware": 22,
     "zero-day": 22,
@@ -114,7 +121,7 @@ def matching_risk_signals(title: str, summary: str) -> list[str]:
         signals.append("cve")
     signals.extend(term for term in ACTIVE_EXPLOIT_TERMS if term in text)
     signals.extend(term for term in CYBER_RISK_TERMS if term in text)
-    signals.extend(term for term in GEOPOLITICAL_ESCALATION_TERMS if term in text)
+    signals.extend(_escalation_hits(text))
     return list(dict.fromkeys(signals))
 
 
@@ -161,7 +168,7 @@ def calculate_risk_score_with_factors(
         score += 10
         factors.append(f"High-impact sector: {', '.join(matched_sectors[:3])} +10")
 
-    escalation_hits = [term for term in GEOPOLITICAL_ESCALATION_TERMS if term in text]
+    escalation_hits = _escalation_hits(text)
     if escalation_hits:
         weight = min(20, len(escalation_hits) * 5)
         score += weight
